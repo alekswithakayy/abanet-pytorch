@@ -108,10 +108,12 @@ parser.add_argument('--evaluate',
                     type=str2bool,
                     help='Evaluate model on validation set')
 
-parser.add_argument('--fine_tune',
-                    default=True,
-                    type=str2bool,
-                    help='Train only the last FC layer.')
+parser.add_argument('--trainable_params',
+                    required=False,
+                    nargs='+',
+                    help='List of trainable params. ex: Including layer1 will'
+                         'train all model params that contain layer1 in their'
+                         'name. Use model.named_parameters() to see all names.')
 
 parser.add_argument('--pretrained',
                     default=True,
@@ -162,7 +164,22 @@ def main():
     num_classes = len(train_dataset.classes)
     model = model_factory.get_model(args.model_arch, num_classes,
                                     args.pretrained, args.prm)
-    trainable_params = model.parameters()
+
+    # Freeze all parameters
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Unfreeze and collect all trainable parameters
+    trainable_params = []
+    trainable_param_count = 0
+    for name, param in model.named_parameters():
+        for word in args.trainable_params:
+            if word in name:
+                param.requires_grad = True
+                trainable_params.append(param)
+                trainable_param_count += 1
+                break
+    print('Found %i trainable parameters' %trainable_param_count)
 
     if cuda and torch.cuda.device_count() > 1:
         print("Loading model on %i cuda devices" % torch.cuda.device_count())
