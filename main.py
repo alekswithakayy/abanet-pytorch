@@ -11,6 +11,7 @@ import torch.distributed as dist
 from torch.optim import SGD
 from torch.utils.data import DataLoader
 
+from util import sampler
 from datasets import dataset_factory
 from models import model_factory
 
@@ -143,8 +144,9 @@ def main():
     train_dir = os.path.join(args.dataset_dir, 'train')
     train_dataset = dataset_factory.get_dataset(args.dataset_name, 'train',
                                                 train_dir)
+    train_sampler = sampler.ImbalancedDatasetSampler(train_dataset)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-        shuffle=True, num_workers=args.num_threads, pin_memory=cuda)
+        num_workers=args.num_threads, pin_memory=cuda, sampler=train_sampler)
 
     # Create validation loader
     val_dir = os.path.join(args.dataset_dir, 'val')
