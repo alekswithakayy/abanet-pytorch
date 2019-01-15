@@ -6,3 +6,4 @@ python ../main.py \
     --model_dir=/Users/aleksandardjuric/Desktop/models \
     --batch_size=16 \
     --lr=0.01 \
+    --trainable_params classifier \
