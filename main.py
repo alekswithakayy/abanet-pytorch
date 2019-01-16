@@ -165,21 +165,26 @@ def main():
     model = model_factory.get_model(args.model_arch, num_classes,
                                     args.pretrained, args.prm)
 
-    # Freeze all parameters
-    for param in model.parameters():
-        param.requires_grad = False
+    if args.trainable_params:
+        # Freeze all parameters
+        for param in model.parameters():
+            param.requires_grad = False
 
-    # Unfreeze and collect all trainable parameters
-    trainable_params = []
-    trainable_param_count = 0
-    for name, param in model.named_parameters():
-        for word in args.trainable_params:
-            if word in name:
-                param.requires_grad = True
-                trainable_params.append(param)
-                trainable_param_count += 1
-                break
-    print('Found %i trainable parameters' %trainable_param_count)
+        # Unfreeze and collect all trainable parameters
+        trainable_params = []
+        trainable_param_count = 0
+        for name, param in model.named_parameters():
+            print('Searching for parameter names containing: %s' % trainable_params)
+            for word in args.trainable_params:
+                if word in name:
+                    param.requires_grad = True
+                    trainable_params.append(param)
+                    trainable_param_count += 1
+                    break
+        print('Training %i model parameters' % trainable_param_count)
+    else:
+        trainable_params = model.parameters()
+        print('Training all model parameters')
 
     if cuda and torch.cuda.device_count() > 1:
         print("Loading model on %i cuda devices" % torch.cuda.device_count())
@@ -198,14 +203,18 @@ def main():
         if os.path.isfile(args.checkpoint):
             print("Checkpoint found at: %s" % args.checkpoint)
             if cuda:
-                checkpoint = torch.load(args.checkpoint)
+                checkpoint = torch.load(args.checkpoint
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor): state[k] = v.cuda()
             else:
                 checkpoint = torch.load(args.checkpoint,
                                         map_location=lambda storage, loc: 'cpu')
+                optimizer.load_state_dict(checkpoint['optimizer'])
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
             print("Loaded checkpoint at epoch: %i" % args.start_epoch)
         else:
             print("No checkpoint found at: %s" % args.checkpoint)
