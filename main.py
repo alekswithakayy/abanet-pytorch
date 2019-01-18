@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
+import torchvision.transforms as transforms
 
 from torch.optim import SGD
 from torch.utils.data import DataLoader
@@ -14,6 +15,10 @@ from torch.utils.data import DataLoader
 from util import sampler
 from datasets import dataset_factory
 from models import model_factory
+
+from PIL import Image
+import matplotlib.pyplot as plt
+from scipy.misc import imresize
 
 
 ####################
@@ -108,6 +113,15 @@ parser.add_argument('--evaluate',
                     type=str2bool,
                     help='Evaluate model on validation set')
 
+parser.add_argument('--inference',
+                    default=False,
+                    type=str2bool,
+                    help='Use model to perform inference on dataset')
+
+parser.add_argument('--inference_dir',
+                    default='/data',
+                    help='Directory containing images to be inferenced.')
+
 parser.add_argument('--trainable_params',
                     required=False,
                     nargs='+',
@@ -127,7 +141,7 @@ def main():
     # Initialize #
     ##############
 
-    global args, best_prec1, cuda, labels
+    global args, best_prec1, cuda, classes
 
     args = parser.parse_args()
 
@@ -137,6 +151,7 @@ def main():
     cuda = torch.cuda.is_available()
     print("Using cuda: %s" % cuda)
 
+    #torch.set_printoptions(threshold=10000)
 
     ###################
     # Create Datasets #
@@ -146,6 +161,7 @@ def main():
     train_dir = os.path.join(args.dataset_dir, 'train')
     train_dataset = dataset_factory.get_dataset(args.dataset_name, 'train',
                                                 train_dir)
+    classes = train_dataset.classes
     train_sampler = sampler.ImbalancedDatasetSampler(train_dataset)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
         num_workers=args.num_threads, pin_memory=cuda, sampler=train_sampler)
@@ -161,11 +177,12 @@ def main():
     # Build Model #
     ###############
 
-    num_classes = len(train_dataset.classes)
-    model = model_factory.get_model(args.model_arch, num_classes,
+    model = model_factory.get_model(args.model_arch, len(classes),
                                     args.pretrained, args.prm)
 
     if args.trainable_params:
+        print('Searching for parameter names containing: %s' % trainable_params)
+
         # Freeze all parameters
         for param in model.parameters():
             param.requires_grad = False
@@ -174,7 +191,6 @@ def main():
         trainable_params = []
         trainable_param_count = 0
         for name, param in model.named_parameters():
-            print('Searching for parameter names containing: %s' % trainable_params)
             for word in args.trainable_params:
                 if word in name:
                     param.requires_grad = True
@@ -195,6 +211,7 @@ def main():
     if cuda: criterion.cuda()
 
     # Define optimizer
+    # filter(lambda p: p.requires_grad, model.parameters())
     optimizer = SGD(trainable_params, args.lr, momentum=args.momentum,
                     weight_decay=args.weight_decay)
 
@@ -203,18 +220,25 @@ def main():
         if os.path.isfile(args.checkpoint):
             print("Checkpoint found at: %s" % args.checkpoint)
             if cuda:
-                checkpoint = torch.load(args.checkpoint
+                checkpoint = torch.load(args.checkpoint)
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 for state in optimizer.state.values():
                     for k, v in state.items():
                         if isinstance(v, torch.Tensor): state[k] = v.cuda()
+                model.load_state_dict(checkpoint['state_dict'])
             else:
                 checkpoint = torch.load(args.checkpoint,
-                                        map_location=lambda storage, loc: 'cpu')
+                                        map_location=lambda storage, loc: storage)
+                from collections import OrderedDict
+                new_state_dict = OrderedDict()
+                for k, v in checkpoint['state_dict'].items():
+                    # remove 'module.' of dataparallel
+                    name = k[7:]
+                    new_state_dict[name]=v
                 optimizer.load_state_dict(checkpoint['optimizer'])
+                model.load_state_dict(new_state_dict)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
-            model.load_state_dict(checkpoint['state_dict'])
             print("Loaded checkpoint at epoch: %i" % args.start_epoch)
         else:
             print("No checkpoint found at: %s" % args.checkpoint)
@@ -266,6 +290,15 @@ def main():
         print("Evaluating model...")
         validate(model, val_loader, criterion)
         return
+
+
+    #############
+    # Inference #
+    #############
+
+    if args.inference:
+        print("Model inferencing...")
+        inference(model)
 
 
 def train(model, dataloader, criterion, optimizer, epoch):
@@ -377,6 +410,62 @@ def validate(model, dataloader, criterion):
     print(' * Prec@1 {top1}'
           .format(top1=numpy.asscalar(top1.avg.cpu().numpy())))
     return top1.avg
+
+
+def inference(model):
+    model.inference()
+
+    transform = transforms.Compose([
+        transforms.Resize(224),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+    ])
+
+    for filename in os.listdir(args.inference_dir):
+        if filename.endswith(".jpg"):
+            image = Image.open(os.path.join(args.inference_dir, filename)).convert('RGB')
+            input = transform(image).unsqueeze(0)
+            if cuda:
+                input = input.cuda().requires_grad_()
+            else:
+                input.requires_grad_()
+                
+            output = model(input)
+
+            if output:
+                # Confidence, Class Response Maps,
+                # Class Peak Response, Peak Response Maps
+                conf, crm, cpr, prm = output
+                print(len(prm))
+                _, idx = torch.max(conf, dim=1)
+                idx = idx.item()
+                #num_plots = 2 + len(prm)
+                num_plots = 5
+                f, axarr = plt.subplots(1, num_plots, figsize=(num_plots * 4, 4))
+
+                # Display input image
+                axarr[0].imshow(imresize(image, (224, 224), interp='bicubic'))
+                axarr[0].set_title('Image')
+                axarr[0].axis('off')
+
+                # Display class response maps
+                axarr[1].imshow(crm[0, idx].cpu(), interpolation='bicubic')
+                axarr[1].set_title('Class Response Map ("%s")' % classes[idx])
+                axarr[1].axis('off')
+
+                # Display peak response maps
+                # for idx, (prm, peak) in enumerate(sorted(zip(prm, cpr), key=lambda v: v[-1][-1])):
+                count = 0
+                for i, (prm, peak) in enumerate(zip(prm, cpr)):
+                    if peak[1].item() == idx:
+                        if count > 2: break
+                        axarr[count + 2].imshow(prm.cpu(), cmap=plt.cm.jet)
+                        axarr[count + 2].set_title('Peak Response Map ("%s")' % (classes[peak[1].item()]))
+                        axarr[count + 2].axis('off')
+                        count += 1
+                plt.show()
+            else:
+                print('No class peak response detected for %s' % os.path.basename(filename))
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
