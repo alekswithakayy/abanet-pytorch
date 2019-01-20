@@ -10,18 +10,10 @@ class ResNetFCN(nn.Module):
 
         model = models.resnet50(pretrained)
 
-        # feature extraction
-        self.features = nn.Sequential(
-            model.conv1,
-            model.bn1,
-            model.relu,
-            model.maxpool,
-            model.layer1,
-            model.layer2,
-            model.layer3,
-            model.layer4)
+        # Remove last two layers (avg_pool and fc) of ResNet
+        self.features = nn.Sequential(*list(model.children())[:-2])
 
-        # classifier
+        # Create new classification layer
         num_features = model.layer4[1].conv1.in_channels
         self.classifier = nn.Sequential(
             nn.Conv2d(num_features, num_classes, kernel_size=1, bias=True))

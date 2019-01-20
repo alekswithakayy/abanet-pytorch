@@ -20,8 +20,8 @@ def get_model(name, num_classes, pretrained, prm):
     return model
 
 def peak_response_mapping(backbone, enable_peak_stimulation=True,
-    enable_peak_backprop=True, win_size=3, sub_pixel_locating_factor=1,
-    filter_type='median'):
+    enable_peak_backprop=True, win_size=5, sub_pixel_locating_factor=1,
+    filter_type='mean'):
     """Peak Response Mapping.
     """
 

@@ -17,6 +17,7 @@ def get_split(split_name, dataset_dir):
             dataset_dir,
             transforms.Compose([
                 transforms.Resize(224),
+                transforms.CenterCrop(224),
                 transforms.ToTensor(),
             ]))
     else:

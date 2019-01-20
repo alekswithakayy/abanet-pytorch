@@ -429,17 +429,17 @@ def inference(model):
                 input = input.cuda().requires_grad_()
             else:
                 input.requires_grad_()
-                
+
             output = model(input)
 
             if output:
                 # Confidence, Class Response Maps,
                 # Class Peak Response, Peak Response Maps
-                conf, crm, cpr, prm = output
-                print(len(prm))
+                conf, crms, cpr, prms = output
+                print(len(prms))
                 _, idx = torch.max(conf, dim=1)
                 idx = idx.item()
-                #num_plots = 2 + len(prm)
+                #num_plots = 2 + len(prms)
                 num_plots = 5
                 f, axarr = plt.subplots(1, num_plots, figsize=(num_plots * 4, 4))
 
@@ -449,18 +449,17 @@ def inference(model):
                 axarr[0].axis('off')
 
                 # Display class response maps
-                axarr[1].imshow(crm[0, idx].cpu(), interpolation='bicubic')
-                axarr[1].set_title('Class Response Map ("%s")' % classes[idx])
+                axarr[1].imshow(crms[0, idx].cpu(), interpolation='bicubic')
+                axarr[1].set_title('Class Response ("%s")' % classes[idx])
                 axarr[1].axis('off')
 
                 # Display peak response maps
-                # for idx, (prm, peak) in enumerate(sorted(zip(prm, cpr), key=lambda v: v[-1][-1])):
                 count = 0
-                for i, (prm, peak) in enumerate(zip(prm, cpr)):
+                for prm, peak in zip(prms, cpr):
                     if peak[1].item() == idx:
                         if count > 2: break
                         axarr[count + 2].imshow(prm.cpu(), cmap=plt.cm.jet)
-                        axarr[count + 2].set_title('Peak Response Map ("%s")' % (classes[peak[1].item()]))
+                        axarr[count + 2].set_title('Peak Response ("%s")' % (classes[peak[1].item()]))
                         axarr[count + 2].axis('off')
                         count += 1
                 plt.show()
