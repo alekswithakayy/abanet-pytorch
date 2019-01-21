@@ -3,12 +3,12 @@
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
-def get_split(split_name, dataset_dir):
+def get_split(split_name, dataset_dir, image_size):
     if split_name == 'train':
         dataset = datasets.ImageFolder(
             dataset_dir,
             transforms.Compose([
-                transforms.RandomResizedCrop(224),
+                transforms.RandomResizedCrop(image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ]))
@@ -16,8 +16,8 @@ def get_split(split_name, dataset_dir):
         dataset = datasets.ImageFolder(
             dataset_dir,
             transforms.Compose([
-                transforms.Resize(224),
-                transforms.CenterCrop(224),
+                transforms.Resize(image_size),
+                transforms.CenterCrop(image_size),
                 transforms.ToTensor(),
             ]))
     else:

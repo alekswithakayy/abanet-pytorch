@@ -6,7 +6,7 @@ from torch.autograd import Function
 class PeakStimulation(Function):
 
     @staticmethod
-    def forward(ctx, input, win_size, peak_filter):
+    def forward(ctx, input, win_size, peak_std):
         ctx.num_flags = 4
 
         assert win_size % 2 == 1, 'Window size for peak finding must be odd.'
@@ -25,27 +25,25 @@ class PeakStimulation(Function):
         # Find index values of peaks
         _, indices  = F.max_pool2d(input_padded, kernel_size=win_size, stride=1,
                                    return_indices=True)
-
         # Create boolean map of peak locations
         peak_map = (indices == index_map)
 
-        # Filter peaks
-        if peak_filter:
-            batch_size, n_channels, h, w = input.size()
-            filter_input = input.view(batch_size, n_channels, h * w)
-            if peak_filter == 'median':
-                thresh, _ = torch.median(filter_input, dim=2)
-            elif peak_filter == 'mean':
-                thresh = torch.mean(filter_input, dim=2)
-            elif peak_filter == 'max':
-                thresh, _ = torch.max(filter_input, dim=2)
-            std = torch.std(filter_input, dim=2)
-            std = std.contiguous().view(batch_size, n_channels, 1, 1)
-            thresh = thresh.contiguous().view(batch_size, n_channels, 1, 1)
-            thresh = (thresh + std * 0.75)
-            peak_mask = input >= thresh
-            peak_map = (peak_map & peak_mask)
+        # Peak filtering using standard deviation
+        batch_size, n_channels, h, w = input.size()
+        filter_input = input.view(batch_size, n_channels, h * w)
 
+        # Calculate mean and std of each class response map
+        mean = torch.mean(filter_input, dim=2)
+        mean = mean.contiguous().view(batch_size, n_channels, 1, 1)
+        std = torch.std(filter_input, dim=2)
+        std = std.contiguous().view(batch_size, n_channels, 1, 1)
+
+        # Use mean and std to find appropriate threshold
+        thresh = mean + std * peak_std
+        peak_mask = input >= thresh
+        peak_map = (peak_map & peak_mask)
+
+        # Save peak response map for backprop
         peak_map = peak_map.float()
         ctx.save_for_backward(input, peak_map)
 
@@ -57,7 +55,7 @@ class PeakStimulation(Function):
         aggregation = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
         n_peaks = peak_map.view(batch_size, n_channels, -1).sum(2)
         peak_average = aggregation / n_peaks
-
+        print(n_peaks)
         return peak_list, peak_average
 
 

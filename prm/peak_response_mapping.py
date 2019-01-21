@@ -17,8 +17,6 @@ class PeakResponseMapping(nn.Sequential):
         super(PeakResponseMapping, self).__init__(*args)
 
         self.inferencing = False
-        # use global average pooling to aggregate responses if peak stimulation is disabled
-        self.enable_peak_stimulation = kargs.get('enable_peak_stimulation', True)
         # return only the class response maps in inference mode if peak backpropagation is disabled
         self.enable_peak_backprop = kargs.get('enable_peak_backprop', True)
         # window size for peak finding
@@ -26,7 +24,7 @@ class PeakResponseMapping(nn.Sequential):
         # sub-pixel peak finding
         self.sub_pixel_locating_factor = kargs.get('sub_pixel_locating_factor', 1)
         # peak filtering
-        self.peak_filter = kargs.get('filter_type', 'median')
+        self.peak_std = kargs.get('peak_std', 0.5)
 
 
     def _patch(self):
@@ -148,7 +146,7 @@ class PeakResponseMapping(nn.Sequential):
         return [dict(category=v[1], mask=v[2], prm=v[3]) for v in instance_list]
 
 
-    def forward(self, input, class_threshold=0, peak_threshold=30, retrieval_cfg=None):
+    def forward(self, input, peak_threshold=30, retrieval_cfg=None):
         assert input.dim() == 4, 'PeakResponseMapping only supports batch mode.'
 
         if self.inferencing:
@@ -157,32 +155,26 @@ class PeakResponseMapping(nn.Sequential):
         # Feed-forward through network to compute class response maps (crms)
         crms = super(PeakResponseMapping, self).forward(input)
 
-        if self.enable_peak_stimulation:
-            if self.sub_pixel_locating_factor > 1:
-                # Upsample class response maps to higher resolution
-                crms = F.upsample(crms,
-                    scale_factor=self.sub_pixel_locating_factor,
-                    mode='bilinear', align_corners=True)
-            # Aggregate responses from informative receptive fields
-            peaks, aggregation = PeakStimulation.apply(crms, self.win_size,
-                self.peak_filter)
+        if self.sub_pixel_locating_factor > 1:
+            # Upsample class response maps to higher resolution
+            crms = F.upsample(crms, scale_factor=self.sub_pixel_locating_factor,
+                mode='bilinear', align_corners=True)
+
+        # Aggregate responses from informative receptive fields
+        peaks, aggregation = PeakStimulation.apply(crms, self.win_size,
+            self.peak_std)
+
+        if not self.inferencing:
+            return aggregation
         else:
-            # Aggregate responses from all receptive fields
-            peaks = None
-            aggregation = F.adaptive_avg_pool2d(crms, 1)
-            aggregation = aggregation.squeeze(2).squeeze(2)
-
-        if self.inferencing:
-
             if not self.enable_peak_backprop:
                 return aggregation, crms
 
             assert crms.size(0) == 1, 'Currently inference mode \
                 with peak backpropagation only supports one image at a time.'
 
-            if peaks is None:
-                peaks, _ = PeakStimulation.apply(crms, self.win_size,
-                    self.peak_filter)
+            # Find index of class with highest confidence
+            _, class_idx = torch.max(aggregation, dim=1)
 
             # Backpropagate peaks to get peak response maps (prms)
             prms = []
@@ -190,7 +182,7 @@ class PeakResponseMapping(nn.Sequential):
             grad_output = crms.new_empty(crms.size())
             for i in range(peaks.size(0)):
                 peak = list(peaks[i])
-                if aggregation[peak[0], peak[1]] >= class_threshold:
+                if peak[1] == class_idx:
                     peak_val = crms[peak]
                     if peak_val > peak_threshold:
                         grad_output.zero_()
@@ -215,8 +207,6 @@ class PeakResponseMapping(nn.Sequential):
                                              retrieval_cfg)
             else:
                 return None
-        else:
-            return aggregation
 
 
     def train(self, mode=True):

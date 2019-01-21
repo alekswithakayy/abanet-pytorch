@@ -63,6 +63,11 @@ parser.add_argument('--batch_size',
                     type=int,
                     help='Mini batch size.')
 
+parser.add_argument('--image_size',
+                    default=448,
+                    type=int,
+                    help='Size of image (smaller dimension)')
+
 parser.add_argument('--lr',
                     default=0.01,
                     type=float,
@@ -92,6 +97,13 @@ parser.add_argument('--prm',
                     default=True,
                     type=str2bool,
                     help='Enable peak response mapping.')
+
+parser.add_argument('--peak_std',
+                    default=0,
+                    type=float,
+                    help='Represents number of standard deviations from mean'
+                         'peak response. Peaks below set std will be filtered.'
+                         'Set to 0 for training, 0.75 for inference.')
 
 parser.add_argument('--print_freq',
                     default=10,
@@ -160,7 +172,7 @@ def main():
     # Create train loader
     train_dir = os.path.join(args.dataset_dir, 'train')
     train_dataset = dataset_factory.get_dataset(args.dataset_name, 'train',
-                                                train_dir)
+                                                train_dir, args.image_size)
     classes = train_dataset.classes
     train_sampler = sampler.ImbalancedDatasetSampler(train_dataset)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
@@ -168,7 +180,8 @@ def main():
 
     # Create validation loader
     val_dir = os.path.join(args.dataset_dir, 'val')
-    val_dataset = dataset_factory.get_dataset(args.dataset_name, 'val', val_dir)
+    val_dataset = dataset_factory.get_dataset(args.dataset_name, 'val', val_dir,
+                                              args.image_size)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
         shuffle=False, num_workers=args.num_threads, pin_memory=cuda)
 
@@ -178,7 +191,7 @@ def main():
     ###############
 
     model = model_factory.get_model(args.model_arch, len(classes),
-                                    args.pretrained, args.prm)
+                                    args.pretrained, args.prm, args.peak_std)
 
     if args.trainable_params:
         print('Searching for parameter names containing: %s' % trainable_params)
@@ -380,8 +393,7 @@ def validate(model, dataloader, criterion):
 
         # For nets that have multiple outputs such as Inception
         if isinstance(output, tuple):
-            loss = sum((criterion(o,target_var) for o in output))
-            # print (output)
+            loss = sum((criterion(o, target_var) for o in output))
             for o in output:
                 prec1 = accuracy(o.data, target, topk=(1,))
                 top1.update(prec1[0], input.size(0))
@@ -416,8 +428,8 @@ def inference(model):
     model.inference()
 
     transform = transforms.Compose([
-        transforms.Resize(224),
-        transforms.CenterCrop(224),
+        transforms.Resize(args.image_size),
+        transforms.CenterCrop(args.image_size),
         transforms.ToTensor(),
     ])
 
@@ -436,10 +448,15 @@ def inference(model):
                 # Confidence, Class Response Maps,
                 # Class Peak Response, Peak Response Maps
                 conf, crms, cpr, prms = output
-                print(len(prms))
                 _, idx = torch.max(conf, dim=1)
                 idx = idx.item()
-                #num_plots = 2 + len(prms)
+
+                print(conf)
+                print(prms.size())
+                print('Class index: %i, Class: %s' % (idx, classes[idx]))
+                print(crms[0,idx,:,:])
+                print(cpr.size())
+
                 num_plots = 5
                 f, axarr = plt.subplots(1, num_plots, figsize=(num_plots * 4, 4))
 
