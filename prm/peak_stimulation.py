@@ -57,6 +57,7 @@ class PeakStimulation(Function):
         # Calculate average of all peaks
         aggregation = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
         n_peaks = peak_map.view(batch_size, n_channels, -1).sum(2)
+        print(n_peaks)
         peak_average = aggregation / n_peaks
 
         return peak_list, peak_average

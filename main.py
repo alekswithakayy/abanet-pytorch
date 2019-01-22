@@ -278,21 +278,30 @@ def main():
             # Train for one epoch
             train(model, train_loader, criterion, optimizer, epoch)
 
-            # Evaluate on validation set
-            prec1 = validate(model, val_loader, criterion)
-
-            # Remember best prec1 and save checkpoint
-            if cuda: prec1 = prec1.cpu()
-
-            is_best = bool(prec1.numpy() > best_prec1.numpy())
-            best_prec1 = torch.FloatTensor(max(prec1.numpy(), best_prec1.numpy()))
-            save_checkpoint({
+            state = {
                 'epoch': epoch + 1,
                 'model_arch': args.model_arch,
                 'state_dict': model.state_dict(),
-                'best_prec1': best_prec1,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best)
+            }
+            filename = 'checkpoint_%s-%i.pth.tar' % (args.model_arch, epoch + 1)
+            torch.save(state, os.path.join(args.model_dir, filename))
+
+            # Evaluate on validation set
+            # prec1 = validate(model, val_loader, criterion)
+
+            # Remember best prec1 and save checkpoint
+            # if cuda: prec1 = prec1.cpu()
+            #
+            # is_best = bool(prec1.numpy() > best_prec1.numpy())
+            # best_prec1 = torch.FloatTensor(max(prec1.numpy(), best_prec1.numpy()))
+            # save_checkpoint({
+            #     'epoch': epoch + 1,
+            #     'model_arch': args.model_arch,
+            #     'state_dict': model.state_dict(),
+            #     'best_prec1': best_prec1,
+            #     'optimizer' : optimizer.state_dict(),
+            # }, is_best)
 
 
     ##############
@@ -484,7 +493,8 @@ def inference(model):
                         axarr[i,j].axis('off')
                 filename, _ = filename.split('.')
                 plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/prms2', filename) + '.png', dpi=300)
-                plt.show()
+                #plt.show()
+                plt.close()
             else:
                 print('No class peak response detected for %s' % os.path.basename(filename))
 

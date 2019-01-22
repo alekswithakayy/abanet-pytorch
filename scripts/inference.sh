@@ -11,4 +11,4 @@ python ../main.py \
     --inference_dir=/Users/aleksandardjuric/Desktop/test \
     --batch_size=16 \
     --lr=0.01 \
-    --peak_std=0.75
+    --peak_std=1
