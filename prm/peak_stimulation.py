@@ -30,18 +30,21 @@ class PeakStimulation(Function):
 
         # Peak filtering using standard deviation
         batch_size, n_channels, h, w = input.size()
-        filter_input = input.view(batch_size, n_channels, h * w)
+        f_input = input.view(batch_size, n_channels, h * w)
 
-        # Calculate mean and std of each class response map
-        mean = torch.mean(filter_input, dim=2)
+        # Calculate mean, max and std of each class response map
+        mean = torch.mean(f_input, dim=2)
         mean = mean.contiguous().view(batch_size, n_channels, 1, 1)
-        std = torch.std(filter_input, dim=2)
+        max, _ = torch.max(f_input, dim=2)
+        max = max.contiguous().view(batch_size, n_channels, 1, 1)
+        std = torch.std(f_input, dim=2)
         std = std.contiguous().view(batch_size, n_channels, 1, 1)
 
         # Use mean and std to find appropriate threshold
         thresh = mean + std * peak_std
-        peak_mask = input >= thresh
-        peak_map = (peak_map & peak_mask)
+        peak_thresh = input >= thresh
+        peak_max = input == max
+        peak_map = (peak_map & (peak_thresh | peak_max))
 
         # Save peak response map for backprop
         peak_map = peak_map.float()
@@ -55,7 +58,7 @@ class PeakStimulation(Function):
         aggregation = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
         n_peaks = peak_map.view(batch_size, n_channels, -1).sum(2)
         peak_average = aggregation / n_peaks
-        print(n_peaks)
+
         return peak_list, peak_average
 
 
