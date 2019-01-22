@@ -427,16 +427,17 @@ def validate(model, dataloader, criterion):
 def inference(model):
     model.inference()
 
-    transform = transforms.Compose([
+    resize_crop = transforms.Compose([
         transforms.Resize(args.image_size),
-        transforms.CenterCrop(args.image_size),
-        transforms.ToTensor(),
+        transforms.CenterCrop(args.image_size)
     ])
 
     for filename in os.listdir(args.inference_dir):
         if filename.endswith(".jpg"):
             image = Image.open(os.path.join(args.inference_dir, filename)).convert('RGB')
-            input = transform(image).unsqueeze(0)
+            image = resize_crop(image)
+            input = transforms.ToTensor()(image).unsqueeze(0)
+
             if cuda:
                 input = input.cuda().requires_grad_()
             else:
@@ -447,7 +448,8 @@ def inference(model):
             if output:
                 # Confidence, Class Response Maps,
                 # Class Peak Response, Peak Response Maps
-                conf, crms, cpr, prms = output
+                conf, crms, cprs, prms = output
+
                 _, idx = torch.max(conf, dim=1)
                 idx = idx.item()
 
@@ -455,30 +457,33 @@ def inference(model):
                 print(prms.size())
                 print('Class index: %i, Class: %s' % (idx, classes[idx]))
                 print(crms[0,idx,:,:])
-                print(cpr.size())
+                print(cprs.size())
 
-                num_plots = 5
-                f, axarr = plt.subplots(1, num_plots, figsize=(num_plots * 4, 4))
+                f, axarr = plt.subplots(3, 3, figsize=(7,7))
 
                 # Display input image
-                axarr[0].imshow(imresize(image, (224, 224), interp='bicubic'))
-                axarr[0].set_title('Image')
-                axarr[0].axis('off')
+                axarr[0,0].imshow(image)
+                axarr[0,0].set_title('Image', size=6)
+                axarr[0,0].axis('off')
 
                 # Display class response maps
-                axarr[1].imshow(crms[0, idx].cpu(), interpolation='bicubic')
-                axarr[1].set_title('Class Response ("%s")' % classes[idx])
-                axarr[1].axis('off')
+                axarr[0,1].imshow(crms[0, idx].cpu(), interpolation='bicubic')
+                axarr[0,1].set_title('Class Response ("%s")' % classes[idx], size=6)
+                axarr[0,1].axis('off')
+
+                axarr[0,2].axis('off')
 
                 # Display peak response maps
                 count = 0
-                for prm, peak in zip(prms, cpr):
-                    if peak[1].item() == idx:
-                        if count > 2: break
-                        axarr[count + 2].imshow(prm.cpu(), cmap=plt.cm.jet)
-                        axarr[count + 2].set_title('Peak Response ("%s")' % (classes[peak[1].item()]))
-                        axarr[count + 2].axis('off')
-                        count += 1
+                for i in range(1,3):
+                    for j in range(0,3):
+                        if count < len(cprs):
+                            axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
+                            axarr[i, j].set_title('Peak Response ("%s")' % (classes[idx]), size=6)
+                            count += 1
+                        axarr[i,j].axis('off')
+                filename, _ = filename.split('.')
+                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/prms2', filename) + '.png', dpi=300)
                 plt.show()
             else:
                 print('No class peak response detected for %s' % os.path.basename(filename))
