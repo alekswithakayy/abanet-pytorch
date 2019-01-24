@@ -18,6 +18,6 @@ def get_model(name, num_classes, pretrained, prm, peak_std):
 
     if prm:
         model = PeakResponseMapping(model, enable_peak_backprop=True,
-            win_size=5, sub_pixel_locating_factor=1, peak_std=peak_std)
+            win_size=3, sub_pixel_locating_factor=1)
 
     return model

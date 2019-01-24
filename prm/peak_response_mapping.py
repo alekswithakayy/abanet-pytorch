@@ -23,8 +23,69 @@ class PeakResponseMapping(nn.Sequential):
         self.win_size = kargs.get('win_size', 3)
         # sub-pixel peak finding
         self.sub_pixel_locating_factor = kargs.get('sub_pixel_locating_factor', 1)
-        # peak filtering
-        self.peak_std = kargs.get('peak_std', 0.5)
+
+
+    def forward(self, input, peak_threshold=30, retrieval_cfg=None):
+        assert input.dim() == 4, 'PeakResponseMapping only supports batch mode.'
+
+        if self.inferencing:
+            input.requires_grad_()
+
+        # Feed-forward through network to compute class response maps (crms)
+        crms = super(PeakResponseMapping, self).forward(input)
+
+        if self.sub_pixel_locating_factor > 1:
+            # Upsample class response maps to higher resolution
+            crms = F.upsample(crms, scale_factor=self.sub_pixel_locating_factor,
+                mode='bilinear', align_corners=True)
+
+        # Aggregate responses from informative receptive fields
+        peaks, aggregation = PeakStimulation.apply(crms, self.win_size,
+            self.inferencing)
+
+        if not self.inferencing:
+            return aggregation
+        else:
+            if not self.enable_peak_backprop:
+                return aggregation, crms
+
+            assert crms.size(0) == 1, 'Currently inference mode \
+                with peak backpropagation only supports one image at a time.'
+
+            # Find index of class with highest confidence
+            _, class_idx = torch.max(aggregation, dim=1)
+
+            # Backpropagate peaks to get peak response maps (prms)
+            prms = []
+            valid_peaks = []
+            grad_output = crms.new_empty(crms.size())
+            for i in range(peaks.size(0)):
+                peak = list(peaks[i])
+                if peak[1] == class_idx:
+                    peak_val = crms[peak]
+                    if peak_val > peak_threshold:
+                        grad_output.zero_()
+                        grad_output[peak] = 1
+                        if input.grad is not None: input.grad.zero_()
+                        crms.backward(grad_output, retain_graph=True)
+                        prm = input.grad.detach().sum(1).clone().clamp(min=0)
+                        prms.append(prm / prm.sum())
+                        valid_peaks.append(peaks[i])
+
+            # return results
+            crms = crms.detach()
+            aggregation = aggregation.detach()
+
+            if len(prms) > 0:
+                valid_peaks = torch.stack(valid_peaks)
+                prms = torch.cat(prms, 0)
+                if retrieval_cfg is None:
+                    return aggregation, crms, valid_peaks, prms
+                else:
+                    return self.instance_seg(crms, valid_peaks, prms,
+                                             retrieval_cfg)
+            else:
+                return None
 
 
     def _patch(self):
@@ -38,6 +99,21 @@ class PeakResponseMapping(nn.Sequential):
         for module in self.modules():
             if isinstance(module, nn.Conv2d) and hasattr(module, '_original_forward'):
                 module.forward = module._original_forward
+
+
+    def train(self, mode=True):
+        super(PeakResponseMapping, self).train(mode)
+        if self.inferencing:
+            self._recover()
+            self.inferencing = False
+        return self
+
+
+    def inference(self):
+        super(PeakResponseMapping, self).train(False)
+        self._patch()
+        self.inferencing = True
+        return self
 
 
     def instance_nms(self, instance_list, threshold=0.3, merge_peak_response=True):
@@ -144,81 +220,3 @@ class PeakResponseMapping(nn.Sequential):
         if nms_threshold is not None:
             instance_list = self.instance_nms(sorted(instance_list, key=lambda x: x[0], reverse=True), nms_threshold, merge_peak_response)
         return [dict(category=v[1], mask=v[2], prm=v[3]) for v in instance_list]
-
-
-    def forward(self, input, peak_threshold=30, retrieval_cfg=None):
-        assert input.dim() == 4, 'PeakResponseMapping only supports batch mode.'
-
-        if self.inferencing:
-            input.requires_grad_()
-
-        # Feed-forward through network to compute class response maps (crms)
-        crms = super(PeakResponseMapping, self).forward(input)
-
-        if self.sub_pixel_locating_factor > 1:
-            # Upsample class response maps to higher resolution
-            crms = F.upsample(crms, scale_factor=self.sub_pixel_locating_factor,
-                mode='bilinear', align_corners=True)
-
-        # Aggregate responses from informative receptive fields
-        peaks, aggregation = PeakStimulation.apply(crms, self.win_size,
-            self.peak_std)
-
-        if not self.inferencing:
-            return aggregation
-        else:
-            if not self.enable_peak_backprop:
-                return aggregation, crms
-
-            assert crms.size(0) == 1, 'Currently inference mode \
-                with peak backpropagation only supports one image at a time.'
-
-            # Find index of class with highest confidence
-            _, class_idx = torch.max(aggregation, dim=1)
-
-            # Backpropagate peaks to get peak response maps (prms)
-            prms = []
-            valid_peaks = []
-            grad_output = crms.new_empty(crms.size())
-            for i in range(peaks.size(0)):
-                peak = list(peaks[i])
-                if peak[1] == class_idx:
-                    peak_val = crms[peak]
-                    if peak_val > peak_threshold:
-                        grad_output.zero_()
-                        grad_output[peak] = 1
-                        if input.grad is not None: input.grad.zero_()
-                        crms.backward(grad_output, retain_graph=True)
-                        prm = input.grad.detach().sum(1).clone().clamp(min=0)
-                        prms.append(prm / prm.sum())
-                        valid_peaks.append(peaks[i])
-
-            # return results
-            crms = crms.detach()
-            aggregation = aggregation.detach()
-
-            if len(prms) > 0:
-                valid_peaks = torch.stack(valid_peaks)
-                prms = torch.cat(prms, 0)
-                if retrieval_cfg is None:
-                    return aggregation, crms, valid_peaks, prms
-                else:
-                    return self.instance_seg(crms, valid_peaks, prms,
-                                             retrieval_cfg)
-            else:
-                return None
-
-
-    def train(self, mode=True):
-        super(PeakResponseMapping, self).train(mode)
-        if self.inferencing:
-            self._recover()
-            self.inferencing = False
-        return self
-
-
-    def inference(self):
-        super(PeakResponseMapping, self).train(False)
-        self._patch()
-        self.inferencing = True
-        return self

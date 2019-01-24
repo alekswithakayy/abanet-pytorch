@@ -224,7 +224,6 @@ def main():
     if cuda: criterion.cuda()
 
     # Define optimizer
-    # filter(lambda p: p.requires_grad, model.parameters())
     optimizer = SGD(trainable_params, args.lr, momentum=args.momentum,
                     weight_decay=args.weight_decay)
 
@@ -251,13 +250,11 @@ def main():
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 model.load_state_dict(new_state_dict)
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
             print("Loaded checkpoint at epoch: %i" % args.start_epoch)
         else:
             print("No checkpoint found at: %s" % args.checkpoint)
     else:
         args.start_epoch = 0
-        best_prec1 = torch.FloatTensor([0])
 
     # Load model on GPU or CPU
     if cuda: model.cuda()
@@ -284,24 +281,9 @@ def main():
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
             }
+
             filename = 'checkpoint_%s-%i.pth.tar' % (args.model_arch, epoch + 1)
             torch.save(state, os.path.join(args.model_dir, filename))
-
-            # Evaluate on validation set
-            # prec1 = validate(model, val_loader, criterion)
-
-            # Remember best prec1 and save checkpoint
-            # if cuda: prec1 = prec1.cpu()
-            #
-            # is_best = bool(prec1.numpy() > best_prec1.numpy())
-            # best_prec1 = torch.FloatTensor(max(prec1.numpy(), best_prec1.numpy()))
-            # save_checkpoint({
-            #     'epoch': epoch + 1,
-            #     'model_arch': args.model_arch,
-            #     'state_dict': model.state_dict(),
-            #     'best_prec1': best_prec1,
-            #     'optimizer' : optimizer.state_dict(),
-            # }, is_best)
 
 
     ##############
@@ -492,8 +474,8 @@ def inference(model):
                             count += 1
                         axarr[i,j].axis('off')
                 filename, _ = filename.split('.')
-                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/prms2', filename) + '.png', dpi=300)
-                #plt.show()
+                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/prms3', filename) + '.png', dpi=300)
+                # plt.show()
                 plt.close()
             else:
                 print('No class peak response detected for %s' % os.path.basename(filename))

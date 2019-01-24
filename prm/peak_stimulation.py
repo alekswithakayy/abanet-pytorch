@@ -6,7 +6,7 @@ from torch.autograd import Function
 class PeakStimulation(Function):
 
     @staticmethod
-    def forward(ctx, input, win_size, peak_std):
+    def forward(ctx, input, win_size, inferencing):
         ctx.num_flags = 4
 
         assert win_size % 2 == 1, 'Window size for peak finding must be odd.'
@@ -28,23 +28,45 @@ class PeakStimulation(Function):
         # Create boolean map of peak locations
         peak_map = (indices == index_map)
 
-        # Peak filtering using standard deviation
         batch_size, n_channels, h, w = input.size()
         f_input = input.view(batch_size, n_channels, h * w)
 
-        # Calculate mean, max and std of each class response map
-        mean = torch.mean(f_input, dim=2)
-        mean = mean.contiguous().view(batch_size, n_channels, 1, 1)
-        max, _ = torch.max(f_input, dim=2)
-        max = max.contiguous().view(batch_size, n_channels, 1, 1)
-        std = torch.std(f_input, dim=2)
-        std = std.contiguous().view(batch_size, n_channels, 1, 1)
+        # During inference, filter peaks using standard deviation
+        if not inferencing:
+            # Use mean and std to find appropriate threshold
+            mean = torch.mean(f_input, dim=2)
+            mean = mean.contiguous().view(batch_size, n_channels, 1, 1)
+            std = torch.std(f_input, dim=2)
+            std = std.contiguous().view(batch_size, n_channels, 1, 1)
+            # Filter out peaks less than n standard deviations
+            # from mean peak response during inference
+            n_std = 1.0
+            thresh = mean + std * n_std
+            valid_peaks = (input >= thresh)
 
-        # Use mean and std to find appropriate threshold
-        thresh = mean + std * peak_std
-        peak_thresh = input >= thresh
-        peak_max = input == max
-        peak_map = (peak_map & (peak_thresh | peak_max))
+            # Use max to ensure at least one peak found (avoid div by 0 later)
+            max, _ = torch.max(f_input, dim=2)
+            max = max.contiguous().view(batch_size, n_channels, 1, 1)
+            max_peak = (input == max)
+
+            # Filter peak map
+            peak_map = (peak_map & (valid_peaks | max_peak))
+
+        # During training, filter peaks lower than kth highest peak response
+        else:
+            # Filters out peaks not belonging to
+            # top percent of peak responses
+            top_x_percent = 0.25
+            k = int(h * w * top_x_percent)
+            topk, _ = torch.topk(f_input, k, dim=2)
+
+            # Use kth highest peak response as threshold
+            thresh = topk[:, :, -1]
+            thresh = thresh.contiguous().view(batch_size, n_channels, 1, 1)
+            valid_peaks = (input >= thresh)
+
+            # Filter peak map
+            peak_map = (peak_map & valid_peaks)
 
         # Save peak response map for backprop
         peak_map = peak_map.float()
@@ -57,7 +79,6 @@ class PeakStimulation(Function):
         # Calculate average of all peaks
         aggregation = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
         n_peaks = peak_map.view(batch_size, n_channels, -1).sum(2)
-        print(n_peaks)
         peak_average = aggregation / n_peaks
 
         return peak_list, peak_average
