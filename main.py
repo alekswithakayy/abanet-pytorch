@@ -236,6 +236,7 @@ def main():
     if args.checkpoint:
         if os.path.isfile(args.checkpoint):
             print("Checkpoint found at: %s" % args.checkpoint)
+            from collections import OrderedDict
             if cuda:
                 checkpoint = torch.load(args.checkpoint)
                 try:
@@ -245,11 +246,14 @@ def main():
                             if isinstance(v, torch.Tensor): state[k] = v.cuda()
                 except ValueError:
                     print('Could not load optimizer state_dict')
+                new_state_dict = OrderedDict()
                 for name, param in checkpoint['state_dict'].items():
+                    add_param = True
                     for word in args.randomize_params:
                         if word in name:
-                            checkpoint['state_dict'].pop(name)
+                            add_param = False
                             break
+                    if add_param: new_state_dict[name] = v
                 model.load_state_dict(checkpoint['state_dict'], strict=False)
             else:
                 checkpoint = torch.load(args.checkpoint,
@@ -258,7 +262,6 @@ def main():
                     optimizer.load_state_dict(checkpoint['optimizer'])
                 except ValueError:
                     print('Could not load optimizer state_dict')
-                from collections import OrderedDict
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint['state_dict'].items():
                     # remove 'module.' of dataparallel
