@@ -11,4 +11,5 @@ python ../main.py \
     --inference=False \
     --batch_size=4 \
     --lr=0.01 \
-    --image_size=448
+    --image_size=448 \
+    --randomize_params=classifier

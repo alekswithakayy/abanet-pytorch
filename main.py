@@ -139,6 +139,13 @@ parser.add_argument('--trainable_params',
                          'train all model params that contain layer1 in their'
                          'name. Use model.named_parameters() to see all names.')
 
+parser.add_argument('--randomize_params',
+                    required=False,
+                    nargs='+',
+                    help='List of params to randomize in model. Parameters '
+                         'that are not randomized will be restored from the '
+                         'checkpoint.')
+
 parser.add_argument('--pretrained',
                     default=True,
                     type=str2bool,
@@ -235,19 +242,29 @@ def main():
                 for state in optimizer.state.values():
                     for k, v in state.items():
                         if isinstance(v, torch.Tensor): state[k] = v.cuda()
-                model.load_state_dict(checkpoint['state_dict'])
+                for name, param in checkpoint['state_dict'].items():
+                    for word in args.randomize_params:
+                        if word in name:
+                            checkpoint['state_dict'].pop(name)
+                            break
+                model.load_state_dict(checkpoint['state_dict'], strict=False)
             else:
                 checkpoint = torch.load(args.checkpoint,
                                         map_location=lambda storage, loc: storage)
+                optimizer.load_state_dict(checkpoint['optimizer'])
                 from collections import OrderedDict
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint['state_dict'].items():
                     # remove 'module.' of dataparallel
                     if k.startswith('module.'): name = k[7:]
                     if name.startswith('0.'): name = name[2:]
-                    new_state_dict[name] = v
-                optimizer.load_state_dict(checkpoint['optimizer'])
-                model.load_state_dict(new_state_dict)
+                    add_param = True
+                    for word in args.randomize_params:
+                        if word in name:
+                            add_param = False
+                            break
+                    if add_param: new_state_dict[name] = v
+                model.load_state_dict(new_state_dict, strict=False)
             start_epoch = checkpoint['epoch']
             print('Loaded checkpoint at epoch: %i' % start_epoch)
         else:
