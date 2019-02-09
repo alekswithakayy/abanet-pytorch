@@ -98,13 +98,6 @@ parser.add_argument('--prm',
                     type=str2bool,
                     help='Enable peak response mapping.')
 
-parser.add_argument('--peak_std',
-                    default=0,
-                    type=float,
-                    help='Represents number of standard deviations from mean'
-                         'peak response. Peaks below set std will be filtered.'
-                         'Set to 0 for training, 0.75 for inference.')
-
 parser.add_argument('--print_freq',
                     default=10,
                     type=int,
@@ -114,6 +107,11 @@ parser.add_argument('--checkpoint',
                     default='',
                     type=str,
                     help='Path to latest checkpoint.')
+
+parser.add_argument('--start_epoch',
+                    default=None,
+                    type=int,
+                    help='Epoch to start training at (effects learning rate)')
 
 parser.add_argument('--train',
                     default=True,
@@ -191,7 +189,7 @@ def main():
     ###############
 
     model = model_factory.get_model(args.model_arch, len(classes),
-                                    args.pretrained, args.prm, args.peak_std)
+                                    args.pretrained)
 
     if args.trainable_params:
         print('Searching for parameter names containing: %s' % trainable_params)
@@ -245,16 +243,21 @@ def main():
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint['state_dict'].items():
                     # remove 'module.' of dataparallel
-                    name = k[7:]
-                    new_state_dict[name]=v
+                    if k.startswith('module.'): name = k[7:]
+                    if name.startswith('0.'): name = name[2:]
+                    new_state_dict[name] = v
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 model.load_state_dict(new_state_dict)
-            args.start_epoch = checkpoint['epoch']
-            print("Loaded checkpoint at epoch: %i" % args.start_epoch)
+            start_epoch = checkpoint['epoch']
+            print('Loaded checkpoint at epoch: %i' % start_epoch)
         else:
-            print("No checkpoint found at: %s" % args.checkpoint)
+            print('No checkpoint found at: %s' % args.checkpoint)
     else:
-        args.start_epoch = 0
+        start_epoch = 0
+
+    if not args.start_epoch:
+        args.start_epoch = start_epoch
+    print('Beginning training from epoch: %s' % args.start_epoch)
 
     # Load model on GPU or CPU
     if cuda: model.cuda()
@@ -416,15 +419,15 @@ def validate(model, dataloader, criterion):
 
 
 def inference(model):
-    model.inference()
-
+    #model.inference()
+    model.train(False)
     resize_crop = transforms.Compose([
         transforms.Resize(args.image_size),
         transforms.CenterCrop(args.image_size)
     ])
 
     for filename in os.listdir(args.inference_dir):
-        if filename.endswith(".jpg"):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
             image = Image.open(os.path.join(args.inference_dir, filename)).convert('RGB')
             image = resize_crop(image)
             input = transforms.ToTensor()(image).unsqueeze(0)
@@ -439,16 +442,14 @@ def inference(model):
             if output:
                 # Confidence, Class Response Maps,
                 # Class Peak Response, Peak Response Maps
-                conf, crms, cprs, prms = output
-
+                # conf, crms, cprs, prms = output
+                conf, crms = output
+                crms = crms.detach()
                 _, idx = torch.max(conf, dim=1)
                 idx = idx.item()
 
-                print(conf)
-                print(prms.size())
                 print('Class index: %i, Class: %s' % (idx, classes[idx]))
-                print(crms[0,idx,:,:])
-                print(cprs.size())
+                # print(cprs.size())
 
                 f, axarr = plt.subplots(3, 3, figsize=(7,7))
 
@@ -462,19 +463,21 @@ def inference(model):
                 axarr[0,1].set_title('Class Response ("%s")' % classes[idx], size=6)
                 axarr[0,1].axis('off')
 
+                axarr[0,2].imshow(crms[0, 4].cpu(), interpolation='bicubic')
+                axarr[0,2].set_title('Class Response ("%s")' % classes[4], size=6)
                 axarr[0,2].axis('off')
 
                 # Display peak response maps
-                count = 0
-                for i in range(1,3):
-                    for j in range(0,3):
-                        if count < len(cprs):
-                            axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
-                            axarr[i, j].set_title('Peak Response ("%s")' % (classes[idx]), size=6)
-                            count += 1
-                        axarr[i,j].axis('off')
-                filename, _ = filename.split('.')
-                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/prms3', filename) + '.png', dpi=300)
+                # count = 0
+                # for i in range(1,3):
+                #     for j in range(0,3):
+                #         if count < len(cprs):
+                #             axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
+                #             axarr[i, j].set_title('Peak Response ("%s")' % (classes[idx]), size=6)
+                #             count += 1
+                #         axarr[i,j].axis('off')
+                # filename, _ = filename.split('.')
+                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/', filename) + '.png', dpi=300)
                 # plt.show()
                 plt.close()
             else:

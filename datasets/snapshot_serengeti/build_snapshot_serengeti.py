@@ -35,10 +35,21 @@ parser.add_argument('--image_size',
                     type=int,
                     help='Base image size')
 
+parser.add_argument('--side_to_scale',
+                    default='height',
+                    type=str,
+                    help='Which side of image to scale to image_size'
+                         'ie "height" or "width"')
+
 parser.add_argument('--num_threads',
                     default=8,
                     type=int,
                     help='Number of worker threads for processing images')
+
+parser.add_argument('--label_category',
+                    default='Species',
+                    type=str,
+                    help='Label category to build ImageFolder dataset for')
 
 args = parser.parse_args()
 
@@ -50,9 +61,8 @@ args = parser.parse_args()
 if not os.path.isdir(args.output_dir):
     os.mkdir(args.output_dir)
 
-species_list_file = os.path.join(args.input_dir, 'species_list.txt')
-species_list = [l.strip() for l in open(species_list_file, 'r').readlines()]
-
+if not any(args.side_to_scale == side for side in ['height', 'width']):
+    args.side_to_scale = 'height'
 
 ####################
 # Helper Functions #
@@ -62,11 +72,11 @@ def process_image(input_file, output_file, pbar):
     if os.path.isfile(output_file): return
     if args.image_size:
         img = Image.open(input_file)
-        if img.size[0] > img.size[1]:
+        if args.side_to_scale == 'height':
             scale_percent = args.image_size / float(img.size[1])
             new_width = int(float(img.size[0]) * float(scale_percent))
             img = img.resize((new_width, args.image_size), Image.ANTIALIAS)
-        else:
+        elif args.side_to_scale == 'width':
             scale_percent = args.image_size / float(img.size[0])
             new_height = int(float(img.size[1]) * float(scale_percent))
             img = img.resize((args.image_size, new_height), Image.ANTIALIAS)
@@ -93,6 +103,7 @@ print('Building training dataset...')
 
 train_labels_file = os.path.join(args.input_dir, 'train_labels.csv')
 train_labels = pd.read_csv(train_labels_file)
+class_list = train_labels[args.label_category].unique().tolist()
 
 train_images_dir = os.path.join(args.input_dir, 'train_images')
 train_dataset_dir = os.path.join(args.output_dir, 'train')
@@ -100,13 +111,13 @@ if not os.path.isdir(train_dataset_dir): os.mkdir(train_dataset_dir)
 
 print('Processing %d train images...' % len(train_labels.index))
 pbar = tqdm(total=len(train_labels.index))
-for species in species_list:
-    img_indices = train_labels[train_labels.Species == species].index
+for class in class_list:
+    img_indices = train_labels[train_labels[args.label_category] == class].index
     img_ids = train_labels.loc[img_indices, 'CaptureEventID'].tolist()
     if len(img_ids):
-        species_dir = os.path.join(train_dataset_dir, species)
-        if not os.path.isdir(species_dir): os.mkdir(species_dir)
-        process_images(img_ids, train_images_dir, species_dir, pbar)
+        class_dir = os.path.join(train_dataset_dir, class)
+        if not os.path.isdir(class_dir): os.mkdir(class_dir)
+        process_images(img_ids, train_images_dir, class_dir, pbar)
 pbar.close()
 
 
@@ -125,13 +136,13 @@ if not os.path.isdir(val_dataset_dir): os.mkdir(val_dataset_dir)
 
 print('Processing %d validation images...' % len(val_labels.index))
 pbar = tqdm(total=len(val_labels.index))
-for species in species_list:
-    img_indices = val_labels[val_labels.Species == species].index
+for class in class_list:
+    img_indices = val_labels[val_labels[args.label_category] == class].index
     img_ids = val_labels.loc[img_indices, 'CaptureEventID'].tolist()
     if len(img_ids):
-        species_dir = os.path.join(val_dataset_dir, species)
-        if not os.path.isdir(species_dir): os.mkdir(species_dir)
-        process_images(img_ids, val_images_dir, species_dir, pbar)
+        class_dir = os.path.join(val_dataset_dir, class)
+        if not os.path.isdir(class_dir): os.mkdir(class_dir)
+        process_images(img_ids, val_images_dir, class_dir, pbar)
 pbar.close()
 
 print('Finished building dataset.')

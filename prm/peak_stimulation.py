@@ -40,7 +40,7 @@ class PeakStimulation(Function):
             std = std.contiguous().view(batch_size, n_channels, 1, 1)
             # Filter out peaks less than n standard deviations
             # from mean peak response during inference
-            n_std = 1.0
+            n_std = 1.5
             thresh = mean + std * n_std
             valid_peaks = (input >= thresh)
 
@@ -56,7 +56,7 @@ class PeakStimulation(Function):
         else:
             # Filters out peaks not belonging to
             # top percent of peak responses
-            top_x_percent = 0.25
+            top_x_percent = 0.5
             k = int(h * w * top_x_percent)
             topk, _ = torch.topk(f_input, k, dim=2)
 
