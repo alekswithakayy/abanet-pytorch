@@ -253,8 +253,8 @@ def main():
                         if word in name:
                             add_param = False
                             break
-                    if add_param: new_state_dict[name] = v
-                model.load_state_dict(checkpoint['state_dict'], strict=False)
+                    if add_param: new_state_dict[name] = param
+                model.load_state_dict(new_state_dict, strict=False)
             else:
                 checkpoint = torch.load(args.checkpoint,
                                         map_location=lambda storage, loc: storage)
@@ -263,16 +263,16 @@ def main():
                 except ValueError:
                     print('Could not load optimizer state_dict')
                 new_state_dict = OrderedDict()
-                for k, v in checkpoint['state_dict'].items():
+                for name, param in checkpoint['state_dict'].items():
                     # remove 'module.' of dataparallel
-                    if k.startswith('module.'): name = k[7:]
+                    if name.startswith('module.'): name = name[7:]
                     if name.startswith('0.'): name = name[2:]
                     add_param = True
                     for word in args.randomize_params:
                         if word in name:
                             add_param = False
                             break
-                    if add_param: new_state_dict[name] = v
+                    if add_param: new_state_dict[name] = param
                 model.load_state_dict(new_state_dict, strict=False)
             start_epoch = checkpoint['epoch']
             print('Loaded checkpoint at epoch: %i' % start_epoch)
