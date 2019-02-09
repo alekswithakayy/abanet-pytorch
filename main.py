@@ -199,7 +199,7 @@ def main():
                                     args.pretrained)
 
     if args.trainable_params:
-        print('Searching for parameter names containing: %s' % trainable_params)
+        print('Searching for parameter names containing: %s' % args.trainable_params)
 
         # Freeze all parameters
         for param in model.parameters():
@@ -238,10 +238,13 @@ def main():
             print("Checkpoint found at: %s" % args.checkpoint)
             if cuda:
                 checkpoint = torch.load(args.checkpoint)
-                optimizer.load_state_dict(checkpoint['optimizer'])
-                for state in optimizer.state.values():
-                    for k, v in state.items():
-                        if isinstance(v, torch.Tensor): state[k] = v.cuda()
+                try:
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                    for state in optimizer.state.values():
+                        for k, v in state.items():
+                            if isinstance(v, torch.Tensor): state[k] = v.cuda()
+                except ValueError:
+                    print('Could not load optimizer state_dict')
                 for name, param in checkpoint['state_dict'].items():
                     for word in args.randomize_params:
                         if word in name:
@@ -251,7 +254,10 @@ def main():
             else:
                 checkpoint = torch.load(args.checkpoint,
                                         map_location=lambda storage, loc: storage)
-                optimizer.load_state_dict(checkpoint['optimizer'])
+                try:
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                except ValueError:
+                    print('Could not load optimizer state_dict')
                 from collections import OrderedDict
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint['state_dict'].items():

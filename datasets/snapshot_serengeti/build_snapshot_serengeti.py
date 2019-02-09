@@ -111,11 +111,11 @@ if not os.path.isdir(train_dataset_dir): os.mkdir(train_dataset_dir)
 
 print('Processing %d train images...' % len(train_labels.index))
 pbar = tqdm(total=len(train_labels.index))
-for class in class_list:
-    img_indices = train_labels[train_labels[args.label_category] == class].index
+for class_ in class_list:
+    img_indices = train_labels[train_labels[args.label_category] == class_].index
     img_ids = train_labels.loc[img_indices, 'CaptureEventID'].tolist()
     if len(img_ids):
-        class_dir = os.path.join(train_dataset_dir, class)
+        class_dir = os.path.join(train_dataset_dir, class_)
         if not os.path.isdir(class_dir): os.mkdir(class_dir)
         process_images(img_ids, train_images_dir, class_dir, pbar)
 pbar.close()
@@ -136,11 +136,11 @@ if not os.path.isdir(val_dataset_dir): os.mkdir(val_dataset_dir)
 
 print('Processing %d validation images...' % len(val_labels.index))
 pbar = tqdm(total=len(val_labels.index))
-for class in class_list:
-    img_indices = val_labels[val_labels[args.label_category] == class].index
+for class_ in class_list:
+    img_indices = val_labels[val_labels[args.label_category] == class_].index
     img_ids = val_labels.loc[img_indices, 'CaptureEventID'].tolist()
     if len(img_ids):
-        class_dir = os.path.join(val_dataset_dir, class)
+        class_dir = os.path.join(val_dataset_dir, class_)
         if not os.path.isdir(class_dir): os.mkdir(class_dir)
         process_images(img_ids, val_images_dir, class_dir, pbar)
 pbar.close()

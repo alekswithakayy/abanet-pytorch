@@ -12,4 +12,5 @@ python ../main.py \
     --batch_size=4 \
     --lr=0.01 \
     --image_size=448 \
-    --randomize_params=classifier
+    --randomize_params=classifier \
+    --trainable_params=classifier \
