@@ -14,3 +14,4 @@ python ../main.py \
     --image_size=448 \
     --randomize_params=classifier \
     --trainable_params=classifier \
+    --start_epoch=0

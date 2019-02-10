@@ -109,7 +109,7 @@ parser.add_argument('--checkpoint',
                     help='Path to latest checkpoint.')
 
 parser.add_argument('--start_epoch',
-                    default=None,
+                    default=-1,
                     type=int,
                     help='Epoch to start training at (effects learning rate)')
 
@@ -281,7 +281,7 @@ def main():
     else:
         start_epoch = 0
 
-    if not args.start_epoch:
+    if args.start_epoch < 0:
         args.start_epoch = start_epoch
     print('Beginning training from epoch: %s' % args.start_epoch)
 
