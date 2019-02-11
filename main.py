@@ -239,13 +239,13 @@ def main():
             from collections import OrderedDict
             if cuda:
                 checkpoint = torch.load(args.checkpoint)
-                try:
-                    optimizer.load_state_dict(checkpoint['optimizer'])
-                    for state in optimizer.state.values():
-                        for k, v in state.items():
-                            if isinstance(v, torch.Tensor): state[k] = v.cuda()
-                except ValueError:
-                    print('Could not load optimizer state_dict')
+                # try:
+                #     optimizer.load_state_dict(checkpoint['optimizer'])
+                #     for state in optimizer.state.values():
+                #         for k, v in state.items():
+                #             if isinstance(v, torch.Tensor): state[k] = v.cuda()
+                # except ValueError:
+                #     print('Could not load optimizer state_dict')
                 new_state_dict = OrderedDict()
                 for name, param in checkpoint['state_dict'].items():
                     add_param = True
@@ -258,10 +258,10 @@ def main():
             else:
                 checkpoint = torch.load(args.checkpoint,
                                         map_location=lambda storage, loc: storage)
-                try:
-                    optimizer.load_state_dict(checkpoint['optimizer'])
-                except ValueError:
-                    print('Could not load optimizer state_dict')
+                # try:
+                #     optimizer.load_state_dict(checkpoint['optimizer'])
+                # except ValueError:
+                #     print('Could not load optimizer state_dict')
                 new_state_dict = OrderedDict()
                 for name, param in checkpoint['state_dict'].items():
                     # remove 'module.' of dataparallel

@@ -2,6 +2,7 @@ import argparse
 import os
 import cv2
 import sys
+import shutil
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -10,7 +11,7 @@ import torchvision.transforms as transforms
 
 from PIL import Image
 from models import model_factory
-from os.path import isfile, join, splitext
+from os.path import isfile, isdir, join, splitext
 
 parser.add_argument('--model_arch',
                     default='resnet_fcn',
@@ -46,6 +47,16 @@ parser.add_argument('--inference_dir',
                     default='/data',
                     help='Directory containing images/videos to be inferenced.')
 
+parser.add_argument('--every_nth_frame',
+                    default=30,
+                    type=int,
+                    help='Process every nth frame in a video.')
+
+
+IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png']
+VIDEO_EXTENSIONS = ['.mp4']
+
+
 def main():
 
     ##############
@@ -60,16 +71,22 @@ def main():
     cuda = torch.cuda.is_available()
     print("Using cuda: %s" % cuda)
 
+    args.class_list_species = sorted(
+        [l.strip() for l in open(args.class_list_species, 'r').readlines()])
+
+    args.class_list_counting = sorted(
+        [l.strip() for l in open(args.class_list_counting, 'r').readlines()])
+
 
     ###############
     # Build Model #
     ###############
 
     species_model = model_factory.get_model(
-        args.model_arch, args.n_classes_species, True)
+        args.model_arch, len(class_list_species), True)
 
     counting_model = model_factory.get_model(
-        args.model_arch, args.n_classes_counting, True)
+        args.model_arch, len(class_list_counting), True)
 
 
     if isfile(args.checkpoint_species) and isfile(args.checkpoint_counting):
@@ -111,33 +128,108 @@ def main():
     # Analyze Data #
     ################
 
+    results_dir = join(args.inference_dir, 'results')
+    if not isdir(results_dir): os.makedirs(results_dir)
+
     for item in os.listdir(args.inference_dir):
         print('Processing %s' % item)
 
-        _, ext = splitext(item)
-        path = join(args.inference_dir, item)
+        item_name, ext = splitext(item)
+        item_path = join(args.inference_dir, item)
+
+        results_file = open(join(results_dir, item_name + '.csv'), 'w')
 
         if ext == '':
-            process_directory(path)
-        elif ext.lower() in ['.mp4']:
-            process_video(path)
-        elif ext.lower() in ['.jpeg', '.jpg', '.png']:
-            process_image(path)
+            results = process_directory(item_path)
+            for species, count in results:
+                results_file.write('%s,%s\n' % (species, count))
+
+        elif ext.lower() in VIDEO_EXTENSIONS:
+            tmp_proc_dir = join(args.inference_dir, 'tmp_proc_dir')
+            os.mkdirs(tmp_proc_dir)
+            results = process_video(item_path, tmp_proc_dir)
+            shutil.rmtree(tmp_proc_dir)
+
+            frame_count = 0
+            for species, count in results:
+                for _ in range(0, args.every_nth_frame):
+                    results_file.write(
+                        '%i,%s,%s\n' % (frame_count, species, count))
+                    frame_count += 1
+
+        elif ext.lower() in IMAGE_EXTENSIONS:
+            species, count = process_image(item_path)
+            results_file.write('%s,%s' % (species, count))
+
         else:
             print('%s is not a recognized file type, skipping...' % item)
             continue
 
-def process_image(path):
-    image = pil_loader(path)
+        results_file.close()
+
+
+def process_image(image_path):
+    _, ext = splitext(image_path)
+    if not ext.lower() in IMAGE_EXTENSIONS:
+        print('%s is not a recognized image type, skipping...' % path)
+        return
+
+    image = load_image(image_path)
     image = resize_image(image, args.image_size)
-    return species_model(image), counting_model(image)
+    input = transforms.ToTensor()(image).unsqueeze(0)
+
+    # Get species
+    species_output = species_model(input)
+    _, idx = torch.max(species_output, dim=1)
+    idx = idx.item()
+    species = args.class_list_species[idx]
+
+    # Get animal count
+    output = counting_model(input)
+    _, idx = torch.max(output, dim=1)
+    idx = idx.item()
+    count = args.class_list_counting[idx]
+
+    return species, count
 
 
-def pil_loader(path):
+def process_directory(dir_path):
+    results = []
+    for file in os.listdir(dir_path):
+        file_path = join(dir_path, file)
+        result = process_image(file_path)
+        results.append(result)
+    return results
+
+def process_video(video_path, tmp_proc_dir):
+    _, ext = splitext(video_path)
+    if not ext.lower() in VIDEO_EXTENSIONS:
+        print('%s is not a recognized video type, skipping...' % path)
+        return
+
+    frame_count = 0
+    video_cap = cv2.VideoCapture(video_path)
+    while video_cap.isOpened():
+        isvalid, frame = video_cap.read()
+        if not (frame_count % args.every_nth_frame == 0):
+            frame_count += 1
+            continue
+        if isvalid:
+            frame_path = join(tmp_proc_dir, 'frame_%i.png' % frame_count)
+            cv2.imwrite(frame_path, frame)
+            frame_count += 1
+        else:
+            print('Invalid video frame detected, stopping...')
+            break
+    video_cap.release()
+
+    return process_directory(tmp_proc_dir)
+
+
+def load_image(path):
     with open(path, 'rb') as f:
         image = Image.open(f)
         return image.convert('RGB')
-
 
 def resize_image(image, size, dim='width'):
     if dim == 'height':
@@ -149,28 +241,6 @@ def resize_image(image, size, dim='width'):
         new_height = int(float(image.size[1]) * float(scale_percent))
         image = image.resize((args.image_size, new_height), Image.ANTIALIAS)
     return image
-
-
-def extract_frames(video_path, frames_dir, every_nth=10):
-    video_cap = cv2.VideoCapture(video_path)
-    data_info_txt = open(frames_dir + '.txt', 'w')
-    idx = 0
-    while video_cap.isOpened():
-        isvalid, frame = video_cap.read()
-        if not (idx % every_nth == 0):
-            idx += 1
-            continue
-        if isvalid:
-            frame_path = os.path.join(frames_dir, 'frame_{}.png'.format(idx))
-            #resized_frame = cv2.resize(frame, (256,256))
-            #cv2.imwrite(frame_path, resized_frame)
-            cv2.imwrite(frame_path, frame)
-            data_info_txt.write(frame_path + ',\n')
-        else:
-            break
-        idx += 1
-    video_cap.release()
-    data_info_txt.close()
 
 
 if __name__ == '__main__':

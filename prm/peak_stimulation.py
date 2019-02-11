@@ -6,7 +6,7 @@ from torch.autograd import Function
 class PeakStimulation(Function):
 
     @staticmethod
-    def forward(ctx, input, win_size, inferencing):
+    def forward(ctx, input, win_size, training):
         ctx.num_flags = 4
 
         assert win_size % 2 == 1, 'Window size for peak finding must be odd.'
@@ -23,8 +23,8 @@ class PeakStimulation(Function):
         index_map = index_map.to(input.device)
 
         # Find index values of peaks
-        _, indices  = F.max_pool2d(input_padded, kernel_size=win_size, stride=1,
-                                   return_indices=True)
+        _, indices  = F.max_pool2d(input_padded, kernel_size=win_size,
+                                   stride=1, return_indices=True)
         # Create boolean map of peak locations
         peak_map = (indices == index_map)
 
@@ -32,7 +32,7 @@ class PeakStimulation(Function):
         f_input = input.view(batch_size, n_channels, h * w)
 
         # During inference, filter peaks using standard deviation
-        if not inferencing:
+        if not training:
             # Use mean and std to find appropriate threshold
             mean = torch.mean(f_input, dim=2)
             mean = mean.contiguous().view(batch_size, n_channels, 1, 1)
