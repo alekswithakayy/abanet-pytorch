@@ -15,10 +15,12 @@ class DenseNetFCN(nn.Module):
         # Create new classification layer
         n_features = model.classifier.in_features
         self.classifier = nn.Sequential(
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1,1)),
             nn.Conv2d(n_features, n_classes, kernel_size=1))
 
     def forward(self, x):
         x = self.features(x)
         x = self.classifier(x)
-        _, x = PeakStimulation.apply(x, 3, self.training)
+        #_, x = PeakStimulation.apply(x, 3, self.training)
         return x

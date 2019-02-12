@@ -140,6 +140,7 @@ parser.add_argument('--trainable_params',
                          'name. Use model.named_parameters() to see all names.')
 
 parser.add_argument('--randomize_params',
+                    default=[],
                     required=False,
                     nargs='+',
                     help='List of params to randomize in model. Parameters '
@@ -299,7 +300,8 @@ def main():
     if args.train:
         print("Starting training...")
         for epoch in range(args.start_epoch, args.epochs):
-            adjust_learning_rate(optimizer, epoch)
+            lr = adjust_learning_rate(optimizer, epoch)
+            print('Learning rate: %s' % lr)
 
             # Train for one epoch
             train(model, train_loader, criterion, optimizer, epoch)
@@ -540,6 +542,7 @@ def adjust_learning_rate(optimizer, epoch):
     lr = args.lr * (args.lr_decay ** (epoch // args.lr_decay_epochs))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+    return lr
 
 
 def accuracy(output, target, topk=(1,)):

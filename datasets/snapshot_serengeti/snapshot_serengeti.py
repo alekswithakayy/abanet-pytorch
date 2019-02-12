@@ -13,7 +13,8 @@ def get_split(split_name, dataset_dir, image_size):
         dataset = datasets.ImageFolder(
             dataset_dir,
             transforms.Compose([
-                transforms.RandomResizedCrop(image_size),
+                #transforms.RandomResizedCrop(image_size),
+                transforms.Resize((image_size, image_size)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ]))
@@ -21,8 +22,9 @@ def get_split(split_name, dataset_dir, image_size):
         dataset = datasets.ImageFolder(
             dataset_dir,
             transforms.Compose([
-                transforms.Resize(image_size),
-                transforms.CenterCrop(image_size),
+                # transforms.Resize(image_size),
+                # transforms.CenterCrop(image_size),
+                transforms.Resize((image_size, image_size)),
                 transforms.ToTensor(),
             ]))
     else:
