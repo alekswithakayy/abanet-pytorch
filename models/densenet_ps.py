@@ -1,13 +1,14 @@
-"""Resnet Fully Connected Network"""
+"""Densenet with Peak Stimulation"""
 
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+from prm.peak_stimulation import PeakStimulation
 
-class ResNetFCN(nn.Module):
+class DenseNetPS(nn.Module):
 
     def __init__(self, dataset, pretrained):
-        super(ResNetFCN, self).__init__()
+        super(DenseNetFCN, self).__init__()
         
         self.n_classes = len(dataset.classes)
         # If only two classes, configure
@@ -15,20 +16,18 @@ class ResNetFCN(nn.Module):
         if self.n_classes == 2:
             self.n_classes = 1
 
-        # Retrieve pretrained resnet
-        model = models.resnet101(pretrained=pretrained)
-
-        # Remove last two layers (avg_pool and fc) of ResNet
-        self.features = nn.Sequential(*list(model.children())[:-2])
+        # Retrieve pretrained densenet
+        model = models.densenet161(pretrained=pretrained)
+        self.features = model.features
 
         # Create new classification layer
-        n_features = model.layer4[1].conv1.in_channels
+        n_features = model.classifier.in_features
         self.classifier = nn.Sequential(
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1,1)),
             nn.Conv2d(n_features, self.n_classes, kernel_size=1))
 
     def forward(self, x):
         x = self.features(x)
-        x = self.classifier(x).squeeze()
+        x = self.classifier(x)
+        _, x = PeakStimulation.apply(x, 3, self.training)
         return x

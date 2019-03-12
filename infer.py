@@ -159,9 +159,11 @@ def main():
             for species, count in results:
                 results_file.write('%i,%s,%s\n' % (frame_count, species, count))
                 frame_count += 1
+            print('\n')
 
         elif ext.lower() in VIDEO_EXTENSIONS:
             tmp_proc_dir = join(args.inference_dir, 'tmp_proc_dir')
+            if isdir(tmp_proc_dir): shutil.rmtree(tmp_proc_dir)
             os.mkdir(tmp_proc_dir)
             results = process_video(item_path, tmp_proc_dir)
             shutil.rmtree(tmp_proc_dir)
@@ -172,10 +174,12 @@ def main():
                     results_file.write(
                         '%i,%s,%s\n' % (frame_count, species, count))
                     frame_count += 1
+            print('\n')
 
         elif ext.lower() in IMAGE_EXTENSIONS:
             species, count = process_image(item_path)
             results_file.write('%s,%s' % (species, count))
+            print('\n')
 
         else:
             print('%s is not a recognized file type, skipping...' % item)
@@ -192,18 +196,20 @@ def process_image(image_path):
         return
 
     image = load_image(image_path)
-    image = resize_image(image, args.image_size)
+    # image = resize_image(image, args.image_size, dim='height')
+    image = transforms.CenterCrop((image.size[1]*0.9, image.size[1] * 1.23))(image)
+    image = transforms.Resize((args.image_size, args.image_size))(image)
     input = transforms.ToTensor()(image).unsqueeze(0)
 
     # Get species
     species_output = species_model(input)
-    _, idx = torch.max(species_output, dim=1)
+    _, idx = torch.max(species_output, dim=0)
     idx = idx.item()
     species = args.class_list_species[idx]
 
     # Get animal count
     output = counting_model(input)
-    _, idx = torch.max(output, dim=1)
+    _, idx = torch.max(output, dim=0)
     idx = idx.item()
     count = args.class_list_counting[idx]
 
@@ -220,6 +226,7 @@ def process_directory(dir_path):
         result = process_image(f_path)
         results.append(result)
         pbar.update()
+    pbar.close()
     return results
 
 
@@ -276,6 +283,76 @@ def remove_data_parallel(state_dict):
         new_state_dict[name] = param
     return new_state_dict
 
+# Archiving this method here for now
+def inference(model):
+    #model.inference()
+    model.train(False)
+    resize_crop = transforms.Compose([
+        transforms.Resize(args.image_size),
+        transforms.CenterCrop(args.image_size)
+    ])
+
+    for filename in os.listdir(args.inference_dir):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
+            image = Image.open(os.path.join(args.inference_dir, filename)).convert('RGB')
+            image = resize_crop(image)
+            input = transforms.ToTensor()(image).unsqueeze(0)
+
+            if args.cuda:
+                input = input.cuda().requires_grad_()
+            else:
+                input.requires_grad_()
+
+            output = model(input)
+
+            if output:
+                # Confidence, Class Response Maps,
+                # Class Peak Response, Peak Response Maps
+                # conf, crms, cprs, prms = output
+                conf, crms = output
+                crms = crms.detach()
+                _, idx = torch.max(conf, dim=1)
+                idx = idx.item()
+
+                print('Class index: %i, Class: %s' % (idx, classes[idx]))
+                # print(cprs.size())
+
+                f, axarr = plt.subplots(3, 3, figsize=(7,7))
+
+                # Display input image
+                axarr[0,0].imshow(image)
+                axarr[0,0].set_title('Image', size=6)
+                axarr[0,0].axis('off')
+
+                # Display class response maps
+                axarr[0,1].imshow(crms[0, idx].cpu(), interpolation='bicubic')
+                axarr[0,1].set_title('Class Response ("%s")' % classes[idx], size=6)
+                axarr[0,1].axis('off')
+
+                axarr[0,2].imshow(crms[0, 4].cpu(), interpolation='bicubic')
+                axarr[0,2].set_title('Class Response ("%s")' % classes[4], size=6)
+                axarr[0,2].axis('off')
+
+                # Display peak response maps
+                # count = 0
+                # for i in range(1,3):
+                #     for j in range(0,3):
+                #         if count < len(cprs):
+                #             axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
+                #             axarr[i, j].set_title('Peak Response ("%s")' % (classes[idx]), size=6)
+                #             count += 1
+                #         axarr[i,j].axis('off')
+                # filename, _ = filename.split('.')
+                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/', filename) + '.png', dpi=300)
+                # plt.show()
+                plt.close()
+            else:
+                print('No class peak response detected for %s' % os.path.basename(filename))
+
 
 if __name__ == '__main__':
     main()
+    # image = load_image('/Users/aleksandardjuric/Desktop/Screen Shot 2019-02-12 at 10.49.24 PM.png')
+    # image = transforms.CenterCrop((image.size[1]*0.9, image.size[1] * 1.23))(image)
+    # image = transforms.Resize((224, 224))(image)
+    # image.save('/Users/aleksandardjuric/Desktop/frame.png')

@@ -1,15 +1,22 @@
+"""Densenet Fully Connected Network"""
+
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from prm.peak_stimulation import PeakStimulation
 
 class DenseNetFCN(nn.Module):
 
-    def __init__(self, n_classes, pretrained):
+    def __init__(self, dataset, pretrained):
         super(DenseNetFCN, self).__init__()
+        
+        self.n_classes = len(dataset.classes)
+        # If only two classes, configure
+        # for binary cross entropy
+        if self.n_classes == 2:
+            self.n_classes = 1
 
+        # Retrieve pretrained densenet
         model = models.densenet161(pretrained=pretrained)
-
         self.features = model.features
 
         # Create new classification layer
@@ -17,10 +24,9 @@ class DenseNetFCN(nn.Module):
         self.classifier = nn.Sequential(
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1,1)),
-            nn.Conv2d(n_features, n_classes, kernel_size=1))
+            nn.Conv2d(n_features, self.n_classes, kernel_size=1))
 
     def forward(self, x):
         x = self.features(x)
-        x = self.classifier(x)
-        #_, x = PeakStimulation.apply(x, 3, self.training)
+        x = self.classifier(x).squeeze()
         return x

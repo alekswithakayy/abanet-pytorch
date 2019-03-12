@@ -4,15 +4,17 @@ import torch
 
 from .resnet_fcn import ResNetFCN
 from .densenet_fcn import DenseNetFCN
+from .densenet_ps import DenseNetPS
 
 models_map = {'resnet_fcn': ResNetFCN,
               'densenet_fcn': DenseNetFCN,
+              'densenet_ps': DenseNetPS,
              }
 
-def get_model(name, n_classes, pretrained):
-    if name not in models_map:
-        raise ValueError('Name of network unknown %s' % name)
+def get_model(model_name, dataset, pretrained):
+    if model_name not in models_map:
+        raise ValueError('Name of network unknown %s' % model_name)
 
-    model = models_map[name](n_classes, pretrained)
+    model = models_map[model_name](dataset, pretrained)
 
     return model

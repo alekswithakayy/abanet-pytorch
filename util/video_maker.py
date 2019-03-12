@@ -7,7 +7,7 @@ class VideoMaker(object):
     def __init__(self):
         pass
 
-    def process(self, video_file, results_file):
+    def process_video(self, video_file, results_file):
         results = [l.strip().split(',') for l in open(results_file, 'r').readlines()]
 
         video_cap = cv2.VideoCapture(video_file)
@@ -19,7 +19,7 @@ class VideoMaker(object):
         path = dirname(results_file)
         base = basename(video_file)
         name, ext = splitext(base)
-        
+
         new_video_file = join(path, name + '_result' + ext.lower())
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         new_video = cv2.VideoWriter(new_video_file, fourcc, fps, (width, height))

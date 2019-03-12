@@ -8,7 +8,10 @@ from os import listdir
 from os.path import isfile, join, splitext
 
 
-def get_split(split_name, dataset_dir, image_size):
+def get_split(split_name, dataset_dir, args):
+    if not args.image_size:
+        raise ValueError('No image size given!')
+    image_size = args.image_size
     if split_name == 'train':
         dataset = datasets.ImageFolder(
             dataset_dir,
