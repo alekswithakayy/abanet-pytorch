@@ -4,16 +4,17 @@ import cv2
 import sys
 import shutil
 import torch
-import torch.nn as nn
-import torch.backends.cudnn as cudnn
-import torch.distributed as dist
+
 import torchvision.transforms as transforms
 
 from PIL import Image
 from models import model_factory
+from datasets import dataset_factory
+
 from os.path import isfile, isdir, join, splitext
 from collections import OrderedDict
 from tqdm import tqdm
+
 
 ####################
 # Input Parameters #
@@ -75,13 +76,14 @@ def main():
     # Initialize #
     ##############
 
-    global args, species_model, counting_model
+    print('** Initializing engine **')
 
+    global args
     args = parser.parse_args()
+    args.cuda = torch.cuda.is_available()
 
-    # Check if cuda is available
-    cuda = torch.cuda.is_available()
-    print("Using cuda: %s" % cuda)
+    for key, value in vars(args).items():
+        print('{:20s}{:s}'.format(key, str(value)))
 
     args.class_list_species = sorted(
         [l.strip() for l in open(args.class_list_species, 'r').readlines()])
@@ -94,10 +96,10 @@ def main():
     # Build Model #
     ###############
 
-    species_model = model_factory.get_model(
+    args.species_model = model_factory.get_model(
         args.model_arch, len(args.class_list_species), True)
 
-    counting_model = model_factory.get_model(
+    args.counting_model = model_factory.get_model(
         args.model_arch, len(args.class_list_counting), True)
 
 
@@ -118,8 +120,8 @@ def main():
             state_dict_species = remove_data_parallel(checkpoint_species['state_dict'])
             state_dict_counting = remove_data_parallel(checkpoint_counting['state_dict'])
 
-        species_model.load_state_dict(state_dict_species)
-        counting_model.load_state_dict(state_dict_counting)
+        args.species_model.load_state_dict(state_dict_species)
+        args.counting_model.load_state_dict(state_dict_counting)
         print('Successfully loaded checkpoints')
     else:
         print('No checkpoint found at: %s' % args.checkpoint)
@@ -128,16 +130,16 @@ def main():
     if cuda:
         if torch.cuda.device_count() > 1:
             print("Loading models on %i cuda devices" % torch.cuda.device_count())
-            species_model = torch.nn.DataParallel(species_model)
-            counting_model = torch.nn.DataParallel(counting_model)
-        species_model.cuda()
-        counting_model.cuda()
+            args.species_model = torch.nn.DataParallel(args.species_model)
+            args.counting_model = torch.nn.DataParallel(args.counting_model)
+        args.species_model.cuda()
+        args.counting_model.cuda()
     else:
-        species_model.cpu()
-        counting_model.cpu()
+        args.species_model.cpu()
+        args.counting_model.cpu()
 
-    species_model.train(False)
-    counting_model.train(False)
+    args.species_model.train(False)
+    args.counting_model.train(False)
 
 
     ################
@@ -202,13 +204,13 @@ def process_image(image_path):
     input = transforms.ToTensor()(image).unsqueeze(0)
 
     # Get species
-    species_output = species_model(input)
+    species_output = args.species_model(input)
     _, idx = torch.max(species_output, dim=0)
     idx = idx.item()
     species = args.class_list_species[idx]
 
     # Get animal count
-    output = counting_model(input)
+    output = args.counting_model(input)
     _, idx = torch.max(output, dim=0)
     idx = idx.item()
     count = args.class_list_counting[idx]

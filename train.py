@@ -37,24 +37,25 @@ parser.add_argument('--dataset_name',
                     help='Name of training dataset.')
 
 parser.add_argument('--dataset_dir',
-                    default='/input',
+                    default=None,
                     help='Directory containing dataset.')
 
 parser.add_argument('--models_dir',
-                    default='/models',
+                    default=None,
                     help='Directory to output model checkpoints.')
 
 parser.add_argument('--checkpoint_file',
-                    default='',
+                    default=None,
                     type=str,
                     help='Path to latest checkpoint.')
 
 parser.add_argument('--pretrained',
-                    default=True,
+                    default=False,
                     type=str2bool,
                     help='Use pre-trained model.')
 
 parser.add_argument('--params_to_train',
+                    default=None,
                     required=False,
                     nargs='+',
                     help='List of trainable params. ex: Including layer1 will'
@@ -62,7 +63,7 @@ parser.add_argument('--params_to_train',
                          'name. Use model.named_parameters() to see all names.')
 
 parser.add_argument('--params_to_randomize',
-                    default=[],
+                    default=None,
                     required=False,
                     nargs='+',
                     help='List of params to randomize in model. Parameters '
@@ -80,7 +81,7 @@ parser.add_argument('--validate',
                     help='Validate model on validation set')
 
 parser.add_argument('--epochs',
-                    default=30,
+                    default=None,
                     type=int,
                     help='Number of epochs to run.')
 
@@ -90,7 +91,7 @@ parser.add_argument('--start_epoch',
                     help='Epoch to start training at (effects learning rate)')
 
 parser.add_argument('--batch_size',
-                    default=32,
+                    default=None,
                     type=int,
                     help='Mini batch size.')
 
@@ -110,12 +111,12 @@ parser.add_argument('--num_threads',
                     help='Number of data loading threads.')
 
 parser.add_argument('--image_size',
-                    default=448,
+                    default=None,
                     type=int,
                     help='Size of image (smaller dimension)')
 
 parser.add_argument('--lr',
-                    default=0.01,
+                    default=0.001,
                     type=float,
                     help='Initial learning rate.')
 
@@ -125,7 +126,7 @@ parser.add_argument('--lr_decay',
                     help='Amount to multiply lr every lr_decay_epochs.')
 
 parser.add_argument('--lr_decay_epochs',
-                    default=10,
+                    default=1,
                     type=int,
                     help='Learning rate decays every lr_decay_epochs.')
 
@@ -185,8 +186,8 @@ def main():
                 pin_memory=args.cuda,
                 sampler=ImbalancedDatasetSampler(dataset['train']))
         else:
-            print("%s does not contain a 'train' directory. \
-                  Training disabled." % train_dir)
+            print("%s does not contain a 'train' directory." % train_dir)
+            print('Training disabled.')
             args.train = False
 
     # Create validation loader
@@ -202,8 +203,8 @@ def main():
                 num_workers=args.num_threads,
                 pin_memory=args.cuda)
         else:
-            print("%s does not contain a 'val' directory. \
-                  Validation disabled." % val_dir)
+            print("%s does not contain a 'val' directory." % val_dir)
+            print('Validation disabled.')
             args.validate = False
 
     if not args.train and not args.validate:
@@ -250,7 +251,7 @@ def main():
         print('Checkpoint successfully loaded')
     else:
         print('No checkpoint found')
-        if not pretrained: print('Training from scratch')
+        if not args.pretrained: print('Training from scratch')
         else: print('Parameters initialized with pytorch pretrained model')
         start_epoch = 0
 
@@ -278,8 +279,13 @@ def main():
             lr = adjust_learning_rate(optimizer, epoch)
             print('Epoch: %s, learning rate: %s' % (epoch, lr))
 
+            start = time.time()
+
             # Train for one epoch
             train(model, loader['train'], criterion, optimizer, epoch)
+
+            epoch_time = (time.time() - start) / 60
+            print('Epoch time: %.2f minutes\n' %  epoch_time)
 
             state = {
                 'epoch': epoch + 1,

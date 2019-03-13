@@ -3,10 +3,12 @@
 import torch
 
 from .resnet_fcn import ResNetFCN
+from .resnet_ps import ResNetPS
 from .densenet_fcn import DenseNetFCN
 from .densenet_ps import DenseNetPS
 
 models_map = {'resnet_fcn': ResNetFCN,
+              'resnet_ps': ResNetPS,
               'densenet_fcn': DenseNetFCN,
               'densenet_ps': DenseNetPS,
              }
