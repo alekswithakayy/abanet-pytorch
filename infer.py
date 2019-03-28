@@ -6,181 +6,109 @@ import shutil
 import torch
 
 import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
 
 from PIL import Image
 from models import model_factory
-from datasets import dataset_factory
+from util import load_checkpoint
+from prm import PeakResponseMapping
 
 from os.path import isfile, isdir, join, splitext
 from collections import OrderedDict
 from tqdm import tqdm
 
 
-####################
-# Input Parameters #
-####################
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--model_arch',
-                    default='resnet_fcn',
-                    type=str,
-                    help='Name of model architecture')
-
-parser.add_argument('--image_size',
-                    default=448,
-                    type=int,
-                    help='Size of image.')
-
-parser.add_argument('--checkpoint_species',
-                    default='',
-                    type=str,
-                    help='Path to latest species model checkpoint.')
-
-parser.add_argument('--class_list_species',
-                    default='',
-                    type=str,
-                    help='Path to list of species classes.')
-
-parser.add_argument('--checkpoint_counting',
-                    default='',
-                    type=str,
-                    help='Path to latest counting model checkpoint.')
-
-parser.add_argument('--class_list_counting',
-                    default='',
-                    type=str,
-                    help='Path to list of counting classes.')
-
-parser.add_argument('--results_dir',
-                    default='/data',
-                    help='Directory where results will be saved.')
-
-parser.add_argument('--inference_dir',
-                    default='/data',
-                    help='Directory containing images/videos to be inferenced.')
-
-parser.add_argument('--every_nth_frame',
-                    default=30,
-                    type=int,
-                    help='Process every nth frame in a video.')
-
-
 IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png']
 VIDEO_EXTENSIONS = ['.mp4']
 
 
-def main():
+def run(infer_args, model_args):
 
     ##############
     # Initialize #
     ##############
 
-    print('** Initializing engine **')
+    print('** Initializing inference engine **')
 
-    global args
-    args = parser.parse_args()
-    args.cuda = torch.cuda.is_available()
+    infer_args.cuda = torch.cuda.is_available()
 
-    for key, value in vars(args).items():
+    for key, value in vars(infer_args).items():
         print('{:20s}{:s}'.format(key, str(value)))
+    print()
 
-    args.class_list_species = sorted(
-        [l.strip() for l in open(args.class_list_species, 'r').readlines()])
-
-    args.class_list_counting = sorted(
-        [l.strip() for l in open(args.class_list_counting, 'r').readlines()])
+    infer_args.classes = sorted(
+        [l.strip() for l in open(infer_args.class_list, 'r').readlines()])
 
 
     ###############
     # Build Model #
     ###############
 
-    args.species_model = model_factory.get_model(
-        args.model_arch, len(args.class_list_species), True)
+    print('** Building model **')
 
-    args.counting_model = model_factory.get_model(
-        args.model_arch, len(args.class_list_counting), True)
+    for key, value in vars(model_args).items():
+        print('{:20s}{:s}'.format(key, str(value)))
+    print()
 
+    # Define model
+    model = model_factory.get_model(model_args, infer_args.cuda)
 
-    if isfile(args.checkpoint_species) and isfile(args.checkpoint_counting):
-        print("Speices checkpoint found at: %s" % args.checkpoint_species)
-        print("Counting checkpoint found at: %s" % args.checkpoint_counting)
-
-        if cuda:
-            checkpoint_species = torch.load(args.checkpoint_species)
-            checkpoint_counting = torch.load(args.checkpoint_counting)
-            state_dict_species = checkpoint_species['state_dict']
-            state_dict_counting = checkpoint_counting['state_dict']
-        else:
-            checkpoint_species = torch.load(args.checkpoint_species,
-                                    map_location=lambda storage, loc: storage)
-            checkpoint_counting = torch.load(args.checkpoint_counting,
-                                    map_location=lambda storage, loc: storage)
-            state_dict_species = remove_data_parallel(checkpoint_species['state_dict'])
-            state_dict_counting = remove_data_parallel(checkpoint_counting['state_dict'])
-
-        args.species_model.load_state_dict(state_dict_species)
-        args.counting_model.load_state_dict(state_dict_counting)
-        print('Successfully loaded checkpoints')
+    # Attempt to load model from checkpoint
+    if model_args.checkpoint and os.path.isfile(model_args.checkpoint):
+        print('Checkpoint found at: %s' % model_args.checkpoint)
+        model, _, _ = load_checkpoint(model, model_args.checkpoint,
+            infer_args.cuda)
+        print('Checkpoint successfully loaded')
     else:
-        print('No checkpoint found at: %s' % args.checkpoint)
-
-
-    if cuda:
-        if torch.cuda.device_count() > 1:
-            print("Loading models on %i cuda devices" % torch.cuda.device_count())
-            args.species_model = torch.nn.DataParallel(args.species_model)
-            args.counting_model = torch.nn.DataParallel(args.counting_model)
-        args.species_model.cuda()
-        args.counting_model.cuda()
-    else:
-        args.species_model.cpu()
-        args.counting_model.cpu()
-
-    args.species_model.train(False)
-    args.counting_model.train(False)
+        print('No checkpoint found at: %s' % model_args.checkpoint)
+        print('Halting inference')
+        return
+    print()
 
 
     ################
     # Analyze Data #
     ################
 
-    for item in os.listdir(args.inference_dir):
+    print('** Beginning inference **')
+
+    model.eval()
+
+    for item in os.listdir(infer_args.inference_dir):
         print('Processing: %s' % item)
 
         item_name, ext = splitext(item)
-        item_path = join(args.inference_dir, item)
+        item_path = join(infer_args.inference_dir, item)
 
-        results_file = open(join(args.results_dir, item_name + '.csv'), 'w')
+        results_file = open(join(infer_args.results_dir, item_name + '.csv'), 'w')
 
         if ext == '' and not 'DS_Store':
-            results = process_directory(item_path)
+            results = process_directory(item_path, model, infer_args)
 
             frame_count = 0
-            for species, count in results:
-                results_file.write('%i,%s,%s\n' % (frame_count, species, count))
+            for result in results:
+                results_file.write('%i,%s\n' % (frame_count, result))
                 frame_count += 1
             print('\n')
 
         elif ext.lower() in VIDEO_EXTENSIONS:
-            tmp_proc_dir = join(args.inference_dir, 'tmp_proc_dir')
+            tmp_proc_dir = join(infer_args.inference_dir, 'tmp_proc_dir')
             if isdir(tmp_proc_dir): shutil.rmtree(tmp_proc_dir)
             os.mkdir(tmp_proc_dir)
-            results = process_video(item_path, tmp_proc_dir)
+            results = process_video(item_path, tmp_proc_dir, model, infer_args)
             shutil.rmtree(tmp_proc_dir)
 
             frame_count = 0
-            for species, count in results:
-                for _ in range(0, args.every_nth_frame):
+            for result in results:
+                for _ in range(0, infer_args.every_nth_frame):
                     results_file.write(
-                        '%i,%s,%s\n' % (frame_count, species, count))
+                        '%i,%s\n' % (frame_count, result))
                     frame_count += 1
             print('\n')
 
         elif ext.lower() in IMAGE_EXTENSIONS:
-            species, count = process_image(item_path)
-            results_file.write('%s,%s' % (species, count))
+            result = process_image(item_path, model, infer_args)
+            results_file.write('%s' % result)
             print('\n')
 
         else:
@@ -190,7 +118,7 @@ def main():
         results_file.close()
 
 
-def process_image(image_path):
+def process_image(image_path, model, infer_args):
     image_name, ext = splitext(image_path)
 
     if not ext.lower() in IMAGE_EXTENSIONS:
@@ -198,41 +126,40 @@ def process_image(image_path):
         return
 
     image = load_image(image_path)
-    # image = resize_image(image, args.image_size, dim='height')
-    image = transforms.CenterCrop((image.size[1]*0.9, image.size[1] * 1.23))(image)
-    image = transforms.Resize((args.image_size, args.image_size))(image)
-    input = transforms.ToTensor()(image).unsqueeze(0)
+    input = transform_image(image, infer_args.image_size)
 
-    # Get species
-    species_output = args.species_model(input)
-    _, idx = torch.max(species_output, dim=0)
-    idx = idx.item()
-    species = args.class_list_species[idx]
+    if infer_args.prm:
+        model = PeakResponseMapping(model)
+        logits, crms, peaks, prms = model(input)
+        _, idx = torch.max(logits, dim=1)
+        idx = idx.item()
+        class_ = infer_args.classes[idx]
+        visualize_prm(image, crms[0, idx], prms, class_, infer_args.results_dir, image_path)
+        return class_
+    else:
+        # Get species
+        output = model(input).squeeze()
+        _, idx = torch.max(output, dim=0)
+        idx = idx.item()
+        class_ = infer_args.classes[idx]
+        return class_
 
-    # Get animal count
-    output = args.counting_model(input)
-    _, idx = torch.max(output, dim=0)
-    idx = idx.item()
-    count = args.class_list_counting[idx]
 
-    return species, count
-
-
-def process_directory(dir_path):
+def process_directory(dir_path, model, infer_args):
     print('Processing frames...')
     results = []
     files = os.listdir(dir_path)
     pbar = tqdm(total=len(files))
     for f in files:
         f_path = join(dir_path, f)
-        result = process_image(f_path)
+        result = process_image(f_path, model, infer_args)
         results.append(result)
         pbar.update()
     pbar.close()
     return results
 
 
-def process_video(video_path, tmp_proc_dir):
+def process_video(video_path, tmp_proc_dir, model, infer_args):
     print('Extracting frames from video...')
 
     _, ext = splitext(video_path)
@@ -244,7 +171,7 @@ def process_video(video_path, tmp_proc_dir):
     video_cap = cv2.VideoCapture(video_path)
     while video_cap.isOpened():
         isvalid, frame = video_cap.read()
-        if not (frame_count % args.every_nth_frame == 0):
+        if not (frame_count % infer_args.every_nth_frame == 0):
             frame_count += 1
             continue
         if isvalid:
@@ -255,7 +182,7 @@ def process_video(video_path, tmp_proc_dir):
             break
     video_cap.release()
 
-    return process_directory(tmp_proc_dir)
+    return process_directory(tmp_proc_dir, model, infer_args)
 
 
 def load_image(path):
@@ -264,97 +191,37 @@ def load_image(path):
         return image.convert('RGB')
 
 
-def resize_image(image, size, dim='width'):
-    if dim == 'height':
-        scale_percent = args.image_size / float(image.size[1])
-        new_width = int(float(image.size[0]) * float(scale_percent))
-        image = image.resize((new_width, args.image_size), Image.ANTIALIAS)
-    elif dim == 'width':
-        scale_percent = args.image_size / float(image.size[0])
-        new_height = int(float(image.size[1]) * float(scale_percent))
-        image = image.resize((args.image_size, new_height), Image.ANTIALIAS)
+def transform_image(image, size):
+    if size:
+        image = transforms.Resize((size, size), Image.ANTIALIAS)(image)
+    image = transforms.ToTensor()(image).unsqueeze(0)
     return image
 
 
-def remove_data_parallel(state_dict):
-    new_state_dict = OrderedDict()
-    for name, param in state_dict.items():
-        # remove 'module.' of dataparallel
-        if name.startswith('module.'): name = name[7:]
-        if name.startswith('0.'): name = name[2:]
-        new_state_dict[name] = param
-    return new_state_dict
-
 # Archiving this method here for now
-def inference(model):
-    #model.inference()
-    model.train(False)
-    resize_crop = transforms.Compose([
-        transforms.Resize(args.image_size),
-        transforms.CenterCrop(args.image_size)
-    ])
+def visualize_prm(image, crm, prms, class_, results_dir, image_path):
+        f, axarr = plt.subplots(3, 3, figsize=(7,7))
 
-    for filename in os.listdir(args.inference_dir):
-        if filename.endswith(".jpg") or filename.endswith(".png"):
-            image = Image.open(os.path.join(args.inference_dir, filename)).convert('RGB')
-            image = resize_crop(image)
-            input = transforms.ToTensor()(image).unsqueeze(0)
+        # Display input image
+        axarr[0,0].imshow(image)
+        axarr[0,0].set_title('Image', size=6)
+        axarr[0,0].axis('off')
 
-            if args.cuda:
-                input = input.cuda().requires_grad_()
-            else:
-                input.requires_grad_()
+        # Display class response maps
+        axarr[0,1].imshow(crm.cpu(), interpolation='bicubic')
+        axarr[0,1].set_title('Class Response ("%s")' % class_, size=6)
+        axarr[0,1].axis('off')
 
-            output = model(input)
+        count = 0
+        for i in range(1,3):
+            for j in range(0,3):
+                if count < len(prms):
+                    axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
+                    axarr[i, j].set_title('Peak Response ("%s")' % class_, size=6)
+                    count += 1
+                axarr[i,j].axis('off')
 
-            if output:
-                # Confidence, Class Response Maps,
-                # Class Peak Response, Peak Response Maps
-                # conf, crms, cprs, prms = output
-                conf, crms = output
-                crms = crms.detach()
-                _, idx = torch.max(conf, dim=1)
-                idx = idx.item()
-
-                print('Class index: %i, Class: %s' % (idx, classes[idx]))
-                # print(cprs.size())
-
-                f, axarr = plt.subplots(3, 3, figsize=(7,7))
-
-                # Display input image
-                axarr[0,0].imshow(image)
-                axarr[0,0].set_title('Image', size=6)
-                axarr[0,0].axis('off')
-
-                # Display class response maps
-                axarr[0,1].imshow(crms[0, idx].cpu(), interpolation='bicubic')
-                axarr[0,1].set_title('Class Response ("%s")' % classes[idx], size=6)
-                axarr[0,1].axis('off')
-
-                axarr[0,2].imshow(crms[0, 4].cpu(), interpolation='bicubic')
-                axarr[0,2].set_title('Class Response ("%s")' % classes[4], size=6)
-                axarr[0,2].axis('off')
-
-                # Display peak response maps
-                # count = 0
-                # for i in range(1,3):
-                #     for j in range(0,3):
-                #         if count < len(cprs):
-                #             axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
-                #             axarr[i, j].set_title('Peak Response ("%s")' % (classes[idx]), size=6)
-                #             count += 1
-                #         axarr[i,j].axis('off')
-                # filename, _ = filename.split('.')
-                plt.savefig(os.path.join('/Users/aleksandardjuric/Desktop/', filename) + '.png', dpi=300)
-                # plt.show()
-                plt.close()
-            else:
-                print('No class peak response detected for %s' % os.path.basename(filename))
-
-
-if __name__ == '__main__':
-    main()
-    # image = load_image('/Users/aleksandardjuric/Desktop/Screen Shot 2019-02-12 at 10.49.24 PM.png')
-    # image = transforms.CenterCrop((image.size[1]*0.9, image.size[1] * 1.23))(image)
-    # image = transforms.Resize((224, 224))(image)
-    # image.save('/Users/aleksandardjuric/Desktop/frame.png')
+        filename = os.path.basename(image_path)
+        filename, _ = filename.rsplit('.', 1)
+        plt.savefig(os.path.join(results_dir, filename) + '.png', dpi=300)
+        plt.close()

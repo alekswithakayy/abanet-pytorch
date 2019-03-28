@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 def BCELoss(cuda):
@@ -6,8 +7,10 @@ def BCELoss(cuda):
     return criterion
 
 def BCEWithLogitsLoss(cuda):
-    criterion = nn.BCEWithLogitsLoss()
-    if cuda: criterion.cuda()
+    bce = nn.BCEWithLogitsLoss()
+    if cuda: bce.cuda()
+    def criterion(output, target):
+        return bce(output.squeeze(), target.float())
     return criterion
 
 def CrossEntropyLoss(cuda):
@@ -21,5 +24,5 @@ criterion_map = {
     'CrossEntropyLoss': CrossEntropyLoss,
 }
 
-def get_criterion(criterion_name, cuda):
-    return criterion_map[criterion_name](cuda)
+def get_criterion(args):
+    return criterion_map[args.criterion](args.cuda)

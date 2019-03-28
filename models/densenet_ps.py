@@ -3,31 +3,35 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from prm.peak_stimulation import PeakStimulation
+from prm import PeakStimulation
 
 class DenseNetPS(nn.Module):
 
-    def __init__(self, dataset, pretrained):
+    def __init__(self, args):
         super(DenseNetPS, self).__init__()
-
-        self.n_classes = len(dataset.classes)
+        self.return_peaks = args.return_peaks
         # If only two classes, configure
         # for binary cross entropy
-        if self.n_classes == 2:
-            self.n_classes = 1
+        if args.num_classes == 2:
+            args.num_classes = 1
 
         # Retrieve pretrained densenet
-        model = models.densenet161(pretrained=pretrained)
+        model = models.densenet161(pretrained=args.pretrained)
         self.features = model.features
 
         # Create new classification layer
         n_features = model.classifier.in_features
         self.classifier = nn.Sequential(
             nn.ReLU(),
-            nn.Conv2d(n_features, self.n_classes, kernel_size=1))
+            nn.Conv2d(n_features, args.num_classes, kernel_size=1))
 
     def forward(self, x):
         x = self.features(x)
-        x = self.classifier(x)
-        _, x = PeakStimulation.apply(x, 3, self.training)
-        return x
+        # Get class response maps
+        crms = self.classifier(x)
+        # Stimulate peak formation
+        peaks, logits = PeakStimulation.apply(crms, 3, self.training)
+        if self.return_peaks:
+            return logits, crms, peaks
+        else:
+            return logits

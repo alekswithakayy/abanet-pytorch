@@ -1,29 +1,28 @@
-from copy import deepcopy
-
 import torch
 import torch.nn.functional as F
-from torch.autograd import Function
+
+from copy import deepcopy
 
 
-class PreHook(Function):
-    
+class PreHook(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, input, offset):
         ctx.save_for_backward(input, offset)
         return input.clone()
-    
+
     @staticmethod
     def backward(ctx, grad_output):
         input, offset = ctx.saved_variables
         return (input - offset) * grad_output, None
-    
-class PostHook(Function):
-    
+
+class PostHook(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, input, norm_factor):
         ctx.save_for_backward(norm_factor)
         return input.clone()
-    
+
     @staticmethod
     def backward(ctx, grad_output):
         norm_factor, = ctx.saved_variables

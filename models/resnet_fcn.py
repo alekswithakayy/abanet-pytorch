@@ -6,17 +6,15 @@ from torchvision import models
 
 class ResNetFCN(nn.Module):
 
-    def __init__(self, dataset, pretrained):
+    def __init__(self, args):
         super(ResNetFCN, self).__init__()
-        
-        self.n_classes = len(dataset.classes)
         # If only two classes, configure
         # for binary cross entropy
-        if self.n_classes == 2:
-            self.n_classes = 1
+        if args.num_classes == 2:
+            args.num_classes = 1
 
         # Retrieve pretrained resnet
-        model = models.resnet101(pretrained=pretrained)
+        model = models.resnet101(pretrained=args.pretrained)
 
         # Remove last two layers (avg_pool and fc) of ResNet
         self.features = nn.Sequential(*list(model.children())[:-2])
@@ -26,7 +24,7 @@ class ResNetFCN(nn.Module):
         self.classifier = nn.Sequential(
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1,1)),
-            nn.Conv2d(n_features, self.n_classes, kernel_size=1))
+            nn.Conv2d(n_features, args.num_classes, kernel_size=1))
 
     def forward(self, x):
         x = self.features(x)

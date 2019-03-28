@@ -29,8 +29,10 @@ class VideoMaker(object):
         while video_cap.isOpened():
             isvalid, frame = video_cap.read()
             if isvalid and len(results) > 0:
-                _, species, count = results.pop(0)
-                text = 'Species=%s, Count=%s' % (species, count)
+                # _, species, count = results.pop(0)
+                # text = 'Species=%s, Count=%s' % (species, count)
+                _, species = results.pop(0)
+                text = 'Species=%s' % (species)
                 location = (20,60)
                 fontScale = 1
                 fontColor = (0,0,255)

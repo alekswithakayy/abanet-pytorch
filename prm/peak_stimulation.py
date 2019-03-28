@@ -78,11 +78,11 @@ class PeakStimulation(Function):
         ctx.mark_non_differentiable(peak_list)
 
         # Calculate average of all peaks
-        aggregation = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
+        logits = (input * peak_map).view(batch_size, n_channels, -1).sum(2)
         n_peaks = peak_map.view(batch_size, n_channels, -1).sum(2)
-        peak_average = aggregation / n_peaks
+        logits = logits / n_peaks
 
-        return peak_list, peak_average
+        return peak_list, logits
 
 
     @staticmethod
