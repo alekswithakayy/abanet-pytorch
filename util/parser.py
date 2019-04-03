@@ -55,6 +55,12 @@ def add_train_args(parser):
                         default=10,
                         type=int,
                         help='Print every n iterations.')
+    parser.add_argument('--mixed_prec_level',
+                        default='O0',
+                        type=str,
+                        help='Level of mixed precision to use.'
+                        'O0 = FP32, O1 = Conservative, O2 = Fast, O3 = FP16'
+                        'O1 or O2 recommended. See Nvidia/Apex for details.')
     parser.add_argument('--criterion',
                         default='CrossEntropyLoss',
                         type=str,
@@ -91,7 +97,7 @@ def add_train_args(parser):
                         'Matching params: '
                         'params_to_train = ^.*(layer4|fc).*$ '
                         'Excluding params: '
-                        'params_to_train = ^((?!ResNet\/(conv1|bn1)).)*$')
+                        'params_to_train = ^((?!ResNet\/(conv1|bn1)).)*$ ')
     parser.add_argument('--params_to_randomize',
                         default=None,
                         help='Regex expression to select params to randomize'

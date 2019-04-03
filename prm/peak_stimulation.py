@@ -70,7 +70,7 @@ class PeakStimulation(Function):
         peak_map = (peak_map & valid_peaks)
 
         # Save peak response map for backprop
-        peak_map = peak_map.float()
+        peak_map = peak_map.half()
         ctx.save_for_backward(input, peak_map)
 
         # Create list of peak locations (indices)

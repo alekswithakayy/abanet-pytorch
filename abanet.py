@@ -25,7 +25,6 @@ def get_section_args(section_name):
     parser.set_defaults(**dict(config.items(section_name)))
     # Command line args override config file
     args, _ = parser.parse_known_args(args_from_cmdline)
-    print('here')
     return args
 
 system_args = get_section_args('SYSTEM')

@@ -2,12 +2,10 @@
 
 import os
 
-from datasets import binary_image_folder
 from datasets import image_folder
 from datasets.snapshot_serengeti import snapshot_serengeti
 
 datasets_map = {
-    'binary_image_folder': binary_image_folder,
     'image_folder': image_folder,
     'snapshot_serengeti': snapshot_serengeti,
 }

@@ -11,8 +11,8 @@ from models import model_factory
 from criterion import criterion_factory
 from optimizer import optimizer_factory
 from util.sampler import ImbalancedDatasetSampler
-from util import load_checkpoint, accuracy, AverageMeter
-
+from util import load_checkpoint, accuracy, AverageMeter, GradientMeter
+from apex import amp
 
 def run(train_args, dataset_args, model_args):
 
@@ -65,7 +65,7 @@ def run(train_args, dataset_args, model_args):
         print('Collecting trainable parameters')
         train_args.params_to_train = collect_trainable_params(model,
             train_args.params_to_train)
-        print('Found %i trainable parameters' % len(params_to_train))
+        print('Found %i trainable parameters' % len(train_args.params_to_train))
     else:
         train_args.params_to_train = model.parameters()
         print('Training all model parameters')
@@ -90,6 +90,7 @@ def run(train_args, dataset_args, model_args):
         else:
             print('Parameters initialized with pytorch pretrained model')
         start_epoch = 0
+    print()
 
     # Determine start epoch
     if train_args.start_epoch < 0:
@@ -98,6 +99,10 @@ def run(train_args, dataset_args, model_args):
     # cuDNN looks for the optimal set of algorithms for network configuration
     # Benchmark mode is good whenever input sizes do not vary
     torch.backends.cudnn.benchmark = True
+
+    print('Preparing model for mixed precision training')
+    model, optimizer = amp.initialize(model, optimizer,
+        opt_level=train_args.mixed_prec_level)
     print()
 
 
@@ -110,19 +115,24 @@ def run(train_args, dataset_args, model_args):
     model.train()
 
     for epoch in range(train_args.start_epoch, train_args.epochs):
-        # Adjusts learning rate every lr_decay_epochs
-        lr = train_args.lr * \
-            (train_args.lr_decay ** (epoch // train_args.lr_decay_epochs))
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        print('Epoch: %s' % epoch)
 
-        print('Epoch: %s, learning rate: %s' % (epoch, lr))
+        train_args.lr_grace_period = 100
+        train_args.lr_grace_count = 0
+        train_args.top1_best_avg = 0
+
+        # Adjusts learning rate every lr_decay_epochs
+        # if train_args.lr_decay and train_args.lr_decay_epochs:
+        #     lr = train_args.lr * \
+        #         (train_args.lr_decay ** (epoch // train_args.lr_decay_epochs))
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = lr
+        #     print('Learning rate: %s' % lr)
 
         start = time.time()
 
         # Train for one epoch
-        train(model, dataloader, criterion, optimizer, epoch, train_args.cuda,
-            train_args.print_freq)
+        train(model, dataloader, criterion, optimizer, epoch, train_args)
 
         epoch_time = (time.time() - start) / 60
         print('Epoch time: %.2f minutes\n' %  epoch_time)
@@ -139,12 +149,13 @@ def run(train_args, dataset_args, model_args):
         torch.save(state, os.path.join(train_args.models_dir, filename))
 
 
-def train(model, dataloader, criterion, optimizer, epoch, cuda, print_freq):
+def train(model, dataloader, criterion, optimizer, epoch, train_args):
     """Train model on training set"""
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
+    grad = GradientMeter(0.99)
 
     end = time.time()
     for i, (input, target) in enumerate(dataloader):
@@ -152,7 +163,7 @@ def train(model, dataloader, criterion, optimizer, epoch, cuda, print_freq):
         data_time.update(time.time() - end)
 
         # Configure input data
-        if cuda:
+        if train_args.cuda:
             input, target = input.cuda(async=True), target.cuda(async=True)
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
@@ -164,11 +175,17 @@ def train(model, dataloader, criterion, optimizer, epoch, cuda, print_freq):
         loss = criterion(output, target_var)
         prec1 = accuracy(output.data, target, topk=(1,))
         top1.update(prec1[0], input.size(0))
+        top1_val = numpy.asscalar(top1.val.cpu().numpy())
+        top1_avg = numpy.asscalar(top1.avg.cpu().numpy())
         losses.update(loss.data, input.size(0))
+        grad.update(prec1[0], input.size(0))
+
+        update_learning_rate(numpy.asscalar(grad.avg.cpu().numpy()), optimizer, train_args)
 
         # Compute gradient and step
         optimizer.zero_grad()
-        loss.backward()
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
         optimizer.step()
 
         # Measure elapsed time
@@ -176,7 +193,7 @@ def train(model, dataloader, criterion, optimizer, epoch, cuda, print_freq):
         end = time.time()
 
         # Info log every print_freq
-        if i % print_freq == 0:
+        if i % train_args.print_freq == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -184,8 +201,9 @@ def train(model, dataloader, criterion, optimizer, epoch, cuda, print_freq):
                   'Prec@1 {top1_val} ({top1_avg})'.format(
                    epoch, i, len(dataloader), batch_time=batch_time,
                    data_time=data_time, loss=losses,
-                   top1_val=numpy.asscalar(top1.val.cpu().numpy()),
-                   top1_avg=numpy.asscalar(top1.avg.cpu().numpy())))
+                   top1_val=top1_val, top1_avg=top1_avg))
+            print('Moving Average: {0}\tGradient: {1}\t'.format(
+                grad.avg, grad.ascent_rate))
 
 
 def collect_trainable_params(model, param_regex):
@@ -197,3 +215,17 @@ def collect_trainable_params(model, param_regex):
             params_to_train.append(param)
         else: param.requires_grad = False
     return params_to_train
+
+
+def update_learning_rate(top1_avg, optimizer, train_args):
+    if top1_avg < train_args.top1_best_avg:
+        train_args.lr_grace_count += 1
+    else:
+        train_args.top1_best_avg = top1_avg
+        train_args.lr_grace_count = 0
+
+    if train_args.lr_grace_count >= train_args.lr_grace_period:
+        train_args.lr = train_args.lr / 2
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = train_args.lr
+        print('Learning rate adjusted to: %s' % train_argsl.lr)

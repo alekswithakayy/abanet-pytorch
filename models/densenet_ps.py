@@ -1,5 +1,6 @@
 """Densenet with Peak Stimulation"""
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
@@ -29,9 +30,19 @@ class DenseNetPS(nn.Module):
         x = self.features(x)
         # Get class response maps
         crms = self.classifier(x)
+        return gwap(crms)
         # Stimulate peak formation
-        peaks, logits = PeakStimulation.apply(crms, 3, self.training)
-        if self.return_peaks:
-            return logits, crms, peaks
-        else:
-            return logits
+        # peaks, logits = PeakStimulation.apply(crms, 3, self.training)
+        # if self.return_peaks:
+        #     return logits, crms, peaks
+        # else:
+        #     return logits
+
+def gwap(x):
+    b, c, h, w = x.size()
+    O_c = F.softmax(x, dim=1)
+    M_c = O_c * torch.sigmoid(x)
+    alpha_c = F.softmax(M_c.view(b, c, h*w), dim=2)
+    x = alpha_c * x.view(b, c, h*w)
+    x = torch.sum(x, dim=2).squeeze()
+    return x

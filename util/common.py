@@ -1,5 +1,6 @@
 import re
 import torch
+import numpy
 
 from collections import OrderedDict
 
@@ -39,7 +40,7 @@ def _retrieve_state_dict(checkpoint, params_to_randomize, cuda):
     new_state_dict = OrderedDict()
     for param_name, param in checkpoint['state_dict'].items():
         # Remove 'module.' of dataparallel
-        if not cuda:
+        if torch.cuda.device_count() <= 1:
             if param_name.startswith('module.'): param_name = param_name[7:]
             if param_name.startswith('0.'): param_name = param_name[2:]
         if not param_regex or param_regex.search(param_name):
@@ -80,3 +81,40 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+class MovingAverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, alpha):
+        self.reset()
+        self.alpha = alpha
+
+    def reset(self):
+        self.avg = 0
+
+    def update(self, val):
+        self.avg = self.avg*self.alpha + val*(1-self.alpha)
+
+class GradientMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, alpha):
+        self.reset()
+        self.alpha = alpha
+
+    def reset(self):
+        self.val = 0
+        self.sum = 0
+        self.count = 0
+        self.avg = 0
+        self.avg_list = [0]
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+        self.avg_list.append(self.avg)
+        grad = numpy.gradient(numpy.array(self.avg_list))
+        if len(self.avg_list) >= 200:
+            self.ascent_rate = grad[-100].item()
+        else:
+            self.ascent_rate = None
