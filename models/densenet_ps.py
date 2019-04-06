@@ -11,10 +11,6 @@ class DenseNetPS(nn.Module):
     def __init__(self, args):
         super(DenseNetPS, self).__init__()
         self.return_peaks = args.return_peaks
-        # If only two classes, configure
-        # for binary cross entropy
-        if args.num_classes == 2:
-            args.num_classes = 1
 
         # Retrieve pretrained densenet
         model = models.densenet161(pretrained=args.pretrained)
@@ -30,7 +26,7 @@ class DenseNetPS(nn.Module):
         x = self.features(x)
         # Get class response maps
         crms = self.classifier(x)
-        return gwap(crms)
+        return global_weighted_avg_pool2D(crms)
         # Stimulate peak formation
         # peaks, logits = PeakStimulation.apply(crms, 3, self.training)
         # if self.return_peaks:
@@ -38,7 +34,7 @@ class DenseNetPS(nn.Module):
         # else:
         #     return logits
 
-def gwap(x):
+def global_weighted_avg_pool2D(x):
     b, c, h, w = x.size()
     O_c = F.softmax(x, dim=1)
     M_c = O_c * torch.sigmoid(x)

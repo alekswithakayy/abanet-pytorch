@@ -8,10 +8,6 @@ class ResNetFCN(nn.Module):
 
     def __init__(self, args):
         super(ResNetFCN, self).__init__()
-        # If only two classes, configure
-        # for binary cross entropy
-        if args.num_classes == 2:
-            args.num_classes = 1
 
         # Retrieve pretrained resnet
         model = models.resnet101(pretrained=args.pretrained)

@@ -10,7 +10,7 @@ from datasets import dataset_factory
 from models import model_factory
 from criterion import criterion_factory
 from optimizer import optimizer_factory
-from util.sampler import ImbalancedDatasetSampler
+from util.sampler import ImbalancedDatasetSampler, ImbalancedDatasetSamplerWithBackground
 from util import load_checkpoint, accuracy, AverageMeter, GradientMeter
 from apex import amp
 
@@ -39,10 +39,14 @@ def run(train_args, dataset_args, model_args):
 
     print('** Loading dataset **')
 
+    for key, value in vars(dataset_args).items():
+        print('{:20s}{:s}'.format(key, str(value)))
+    print()
+
     dataset = dataset_factory.get_dataset('train', dataset_args)
     dataloader = DataLoader(dataset, batch_size=dataset_args.batch_size,
         num_workers=dataset_args.num_threads, pin_memory=train_args.cuda,
-        sampler=ImbalancedDatasetSampler(dataset))
+        sampler=ImbalancedDatasetSamplerWithBackground(dataset))
 
     print('Found %s samples in training set' % len(dataset))
     print()
@@ -139,13 +143,13 @@ def run(train_args, dataset_args, model_args):
 
         state = {
             'epoch': epoch + 1,
-            'architecture': train_args.architecture,
+            'architecture': model_args.architecture,
             'state_dict': model.state_dict(),
             'optimizer' : optimizer.state_dict(),
         }
 
         filename = 'checkpoint_%s-%i.pth.tar' \
-            % (train_args.architecture, epoch + 1)
+            % (model_args.architecture, epoch + 1)
         torch.save(state, os.path.join(train_args.models_dir, filename))
 
 
@@ -154,8 +158,7 @@ def train(model, dataloader, criterion, optimizer, epoch, train_args):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    top1 = AverageMeter()
-    grad = GradientMeter(0.99)
+    top1 = GradientMeter()
 
     end = time.time()
     for i, (input, target) in enumerate(dataloader):
@@ -175,12 +178,9 @@ def train(model, dataloader, criterion, optimizer, epoch, train_args):
         loss = criterion(output, target_var)
         prec1 = accuracy(output.data, target, topk=(1,))
         top1.update(prec1[0], input.size(0))
-        top1_val = numpy.asscalar(top1.val.cpu().numpy())
-        top1_avg = numpy.asscalar(top1.avg.cpu().numpy())
         losses.update(loss.data, input.size(0))
-        grad.update(prec1[0], input.size(0))
 
-        update_learning_rate(numpy.asscalar(grad.avg.cpu().numpy()), optimizer, train_args)
+        update_learning_rate(top1.gradient, optimizer, train_args)
 
         # Compute gradient and step
         optimizer.zero_grad()
@@ -201,9 +201,11 @@ def train(model, dataloader, criterion, optimizer, epoch, train_args):
                   'Prec@1 {top1_val} ({top1_avg})'.format(
                    epoch, i, len(dataloader), batch_time=batch_time,
                    data_time=data_time, loss=losses,
-                   top1_val=top1_val, top1_avg=top1_avg))
-            print('Moving Average: {0}\tGradient: {1}\t'.format(
-                grad.avg, grad.ascent_rate))
+                   top1_val=numpy.asscalar(top1.val.cpu().numpy()),
+                   top1_avg=numpy.asscalar(top1.avg.cpu().numpy())))
+            if top1.gradient:
+                print('Improvement rate: {0}'.format(
+                    numpy.asscalar(top1.gradient.cpu().numpy())))
 
 
 def collect_trainable_params(model, param_regex):
@@ -217,15 +219,11 @@ def collect_trainable_params(model, param_regex):
     return params_to_train
 
 
-def update_learning_rate(top1_avg, optimizer, train_args):
-    if top1_avg < train_args.top1_best_avg:
-        train_args.lr_grace_count += 1
-    else:
-        train_args.top1_best_avg = top1_avg
-        train_args.lr_grace_count = 0
-
-    if train_args.lr_grace_count >= train_args.lr_grace_period:
-        train_args.lr = train_args.lr / 2
+def update_learning_rate(top1_gradient, optimizer, train_args):
+    if not top1_gradient:
+        return
+    if top1_gradient < train_args.lr:
+        train_args.lr = train_args.lr / 10
         for param_group in optimizer.param_groups:
             param_group['lr'] = train_args.lr
-        print('Learning rate adjusted to: %s' % train_argsl.lr)
+        print('Learning rate adjusted to: %s' % train_args.lr)

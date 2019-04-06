@@ -94,27 +94,50 @@ class MovingAverageMeter(object):
     def update(self, val):
         self.avg = self.avg*self.alpha + val*(1-self.alpha)
 
+# class GradientMeter(object):
+#     """Computes and stores the average and current value"""
+#     def __init__(self):
+#         self.reset()
+#
+#     def reset(self):
+#         self.val = 0
+#         self.sum = 0
+#         self.count = 0
+#         self.avg = 0
+#         self.avg_list = []
+#         self.gradient = None
+#
+#     def update(self, val, n=1):
+#         self.val = val
+#         self.sum += val * n
+#         self.count += n
+#         self.avg = self.sum / self.count
+#         self.avg_list.append(self.avg)
+#         if len(self.avg_list) >= 1000:
+#             self.gradient = (self.avg_list[-1] - self.avg_list[-1000]) / 1000
+#         else:
+#             self.gradient = None
+
 class GradientMeter(object):
     """Computes and stores the average and current value"""
-    def __init__(self, alpha):
+    def __init__(self, alpha=0.999):
         self.reset()
         self.alpha = alpha
 
     def reset(self):
         self.val = 0
-        self.sum = 0
-        self.count = 0
         self.avg = 0
-        self.avg_list = [0]
+        self.avg_list = []
+        self.gradient = None
 
     def update(self, val, n=1):
         self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-        self.avg_list.append(self.avg)
-        grad = numpy.gradient(numpy.array(self.avg_list))
-        if len(self.avg_list) >= 200:
-            self.ascent_rate = grad[-100].item()
+        if self.avg == 0:
+            self.avg = val
         else:
-            self.ascent_rate = None
+            self.avg = self.avg * self.alpha + val * (1 - self.alpha)
+        self.avg_list.append(self.avg)
+        if len(self.avg_list) >= 1000:
+            self.gradient = (self.avg_list[-1] - self.avg_list[-1000]) / 1000
+        else:
+            self.gradient = None

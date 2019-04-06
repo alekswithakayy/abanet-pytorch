@@ -8,10 +8,6 @@ class DenseNetFCN(nn.Module):
 
     def __init__(self, args):
         super(DenseNetFCN, self).__init__()
-        # If only two classes, configure
-        # for binary cross entropy
-        if args.num_classes == 2:
-            args.num_classes = 1
 
         # Retrieve pretrained densenet
         model = models.densenet161(pretrained=args.pretrained)

@@ -1,24 +1,37 @@
-"Returns split for a pytorch image folder dataset"
+"Returns split for a pytorch dataset folder dataset"
 
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+
+from PIL import Image
+
+IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+
+def pil_loader(path):
+    with open(path, 'rb') as f:
+        img = Image.open(f)
+        return img.convert('RGB')
 
 def get_split(split_name, dataset_dir, args):
     if not args.image_size:
         raise ValueError('No image size given!')
     image_size = args.image_size
     if split_name == 'train':
-        dataset = datasets.ImageFolder(
+        dataset = datasets.DatasetFolder(
             dataset_dir,
-            transforms.Compose([
+            pil_loader,
+            IMG_EXTENSIONS,
+            transform=transforms.Compose([
                 transforms.Resize((image_size, image_size)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ]))
     elif split_name == 'test':
-        dataset = datasets.ImageFolder(
+        dataset = datasets.DatasetFolder(
             dataset_dir,
-            transforms.Compose([
+            pil_loader,
+            IMG_EXTENSIONS,
+            transform=transforms.Compose([
                 transforms.Resize((image_size, image_size)),
                 transforms.ToTensor(),
             ]))
