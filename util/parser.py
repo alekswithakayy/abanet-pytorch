@@ -16,21 +16,57 @@ def add_system_args(parser):
                         default=False,
                         type=str2bool,
                         help='Perform inference with the model')
+    parser.add_argument('--output_file',
+                        default=None,
+                        type=str,
+                        help='If specified, redirects output to file')
     return parser
+
+
+def clean_system_args(args):
+    return args
+
+
+def add_model_args(parser):
+    parser.add_argument('--architecture',
+                        default='',
+                        type=str,
+                        help='Name of model architecture')
+    parser.add_argument('--pretrained',
+                        default=False,
+                        type=str2bool,
+                        help='Use pre-trained model.')
+    parser.add_argument('--checkpoint',
+                        default=None,
+                        type=str,
+                        help='Path to latest checkpoint.')
+    parser.add_argument('--num_classes',
+                        default=None,
+                        type=int,
+                        help='Number of classes')
+    return parser
+
+
+def clean_model_args(args):
+    return args
 
 
 def add_dataset_args(parser):
     parser.add_argument('--dataset',
-                        default='image_folder',
+                        default='dataset_folder',
                         type=str,
                         help='Name of pytorch dataset to use')
     parser.add_argument('--dataset_dir',
                         default=None,
                         help='Directory containing dataset')
+    parser.add_argument('--backgnd_samp_prob',
+                        default=0.2,
+                        type=float,
+                        help='Sampling rate of background class.')
     parser.add_argument('--image_size',
-                        default=None,
-                        type=int,
-                        help='Size of transformed image ie size x size')
+                        default='',
+                        type=str,
+                        help='Size of transformed image ie height,width')
     parser.add_argument('--num_threads',
                         default=4,
                         type=int,
@@ -40,6 +76,11 @@ def add_dataset_args(parser):
                         type=int,
                         help='Mini batch size.')
     return parser
+
+
+def clean_dataset_args(args):
+    args.image_size = [int(s) for s in args.image_size.split(',')]
+    return args
 
 
 def add_train_args(parser):
@@ -76,11 +117,12 @@ def add_train_args(parser):
     parser.add_argument('--lr_decay',
                         default=0.1,
                         type=float,
-                        help='Amount to multiply lr every lr_decay_epochs.')
-    parser.add_argument('--lr_decay_epochs',
-                        default=1,
-                        type=int,
-                        help='Learning rate decays every lr_decay_epochs.')
+                        help='Amount to multiply lr every lr_decay_iters.')
+    parser.add_argument('--lr_decay_iters',
+                        default='',
+                        type=str,
+                        help='Learning rate is decayed by lr_decay for each '
+                        'iteration in lr_decay_iters.')
     parser.add_argument('--momentum',
                         default=0.9,
                         type=float,
@@ -108,6 +150,11 @@ def add_train_args(parser):
     return parser
 
 
+def clean_train_args(args):
+    args.lr_decay_iters = [int(s) for s in args.lr_decay_iters.split(',')]
+    return args
+
+
 def add_test_args(parser):
     parser.add_argument('--criterion',
                         default='CrossEntropyLoss',
@@ -118,6 +165,10 @@ def add_test_args(parser):
                         type=int,
                         help='Print every n iterations.')
     return parser
+
+
+def clean_test_args(args):
+    return args
 
 
 def add_infer_args(parser):
@@ -135,39 +186,32 @@ def add_infer_args(parser):
                         default=30,
                         type=int,
                         help='Process every nth frame in a video.')
-    parser.add_argument('--image_size',
-                        default=None,
-                        type=int,
-                        help='Size of transformed image ie size x size')
-    parser.add_argument('--prm',
-                        default=False,
-                        type=str2bool,
-                        help='Perform peak response mapping')
-    return parser
-
-
-def add_model_args(parser):
-    parser.add_argument('--architecture',
+    parser.add_argument('--crop',
                         default='',
                         type=str,
-                        help='Name of model architecture')
-    parser.add_argument('--pretrained',
-                        default=False,
-                        type=str2bool,
-                        help='Use pre-trained model.')
-    parser.add_argument('--checkpoint',
+                        help='Crops rectangular region from input image. The '
+                        'box is a 4-tuple defining the left, upper, right, and '
+                        'lower pixel coordinate.')
+    parser.add_argument('--image_size',
                         default=None,
                         type=str,
-                        help='Path to latest checkpoint.')
-    parser.add_argument('--num_classes',
+                        help='Size of transformed image ie width,heights')
+    parser.add_argument('--batch_size',
                         default=None,
                         type=int,
-                        help='Number of classes')
-    parser.add_argument('--return_peaks',
+                        help='Mini batch size.')
+    parser.add_argument('--visualize_results',
                         default=False,
                         type=str2bool,
-                        help='Return peaks from class response maps')
+                        help='Create a visual representation of processed '
+                        'video/image results')
     return parser
+
+
+def clean_infer_args(args):
+    args.image_size = [int(s) for s in args.image_size.split(',')]
+    args.crop = [int(s) for s in args.crop.split(',')]
+    return args
 
 
 section_parser_map = {
@@ -182,3 +226,15 @@ section_parser_map = {
 def get_section_parser(section):
     parser = argparse.ArgumentParser()
     return section_parser_map[section](parser)
+
+section_cleaner_map = {
+    'SYSTEM': clean_system_args,
+    'DATASET': clean_dataset_args,
+    'TRAIN': clean_train_args,
+    'TEST': clean_test_args,
+    'INFER': clean_infer_args,
+    'MODEL': clean_model_args
+}
+
+def clean_section_args(args, section):
+    return section_cleaner_map[section](args)

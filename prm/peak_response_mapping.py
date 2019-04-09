@@ -11,9 +11,6 @@ class PeakResponseMapping(nn.Sequential):
 
     def __init__(self, args):
         super(PeakResponseMapping, self).__init__(args)
-        if not args.return_peaks:
-            raise ValueError('Model must return peaks to perform \
-                peak response mapping')
         self.eval()
         self.peak_threshold = 30
 

@@ -1,3 +1,4 @@
+import sys
 import argparse
 import configparser
 
@@ -5,7 +6,7 @@ import train
 import test
 import infer
 
-from util.parser import get_section_parser
+from util.parser import get_section_parser, clean_section_args
 
 # Parse command line arguments as meta_args
 parser = argparse.ArgumentParser()
@@ -25,11 +26,16 @@ def get_section_args(section_name):
     parser.set_defaults(**dict(config.items(section_name)))
     # Command line args override config file
     args, _ = parser.parse_known_args(args_from_cmdline)
+    args = clean_section_args(args, section_name)
     return args
 
 system_args = get_section_args('SYSTEM')
 dataset_args = get_section_args('DATASET')
 model_args = get_section_args('MODEL')
+
+if system_args.output_file:
+    file = open(system_args.output_file, 'w+')
+    sys.stdout = file
 
 if system_args.train:
     train_args = get_section_args('TRAIN')
@@ -42,3 +48,6 @@ if system_args.test:
 if system_args.infer:
     infer_args = get_section_args('INFER')
     infer.run(infer_args, model_args)
+
+if system_args.output_file:
+    file.close()

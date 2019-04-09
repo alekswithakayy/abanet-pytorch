@@ -15,14 +15,13 @@ def pil_loader(path):
 def get_split(split_name, dataset_dir, args):
     if not args.image_size:
         raise ValueError('No image size given!')
-    image_size = args.image_size
     if split_name == 'train':
         dataset = datasets.DatasetFolder(
             dataset_dir,
             pil_loader,
             IMG_EXTENSIONS,
             transform=transforms.Compose([
-                transforms.Resize((image_size, image_size)),
+                transforms.Resize(args.image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ]))
@@ -32,7 +31,7 @@ def get_split(split_name, dataset_dir, args):
             pil_loader,
             IMG_EXTENSIONS,
             transform=transforms.Compose([
-                transforms.Resize((image_size, image_size)),
+                transforms.Resize(args.image_size),
                 transforms.ToTensor(),
             ]))
     else:

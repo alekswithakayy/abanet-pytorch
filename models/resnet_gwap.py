@@ -1,17 +1,14 @@
-"""Resnet with Peak Stimulation"""
+"""Resnet with global weighted average pooling classifier"""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from prm.peak_stimulation import PeakStimulation
 
-class ResNetPS(nn.Module):
+class ResNetGWAP(nn.Module):
 
     def __init__(self, args):
-        super(ResNetPS, self).__init__()
-        self.return_peaks = args.return_peaks
-
+        super(ResNetGWAP, self).__init__()
         # Retrieve pretrained resnet
         model = models.resnet101(pretrained=args.pretrained)
 
@@ -26,15 +23,13 @@ class ResNetPS(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
-        # Get class response maps
-        crms = self.classifier(x)
-        return global_weighted_avg_pool2D(crms)
-        # # Stimulate peak formation
-        # peaks, logits = PeakStimulation.apply(crms, 3, self.training)
-        # if self.return_peaks:
-        #     return logits, crms, peaks
-        # else:
-        #     return logits
+        activation_maps = self.classifier(x)
+        logits = global_weighted_avg_pool2D(activation_maps)
+        if not self.training:
+            return logits, activation_maps
+        else:
+            return logits
+
 
 def global_weighted_avg_pool2D(x):
     b, c, h, w = x.size()

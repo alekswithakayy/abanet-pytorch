@@ -3,14 +3,14 @@
 import torch
 
 from .resnet_fcn import ResNetFCN
-from .resnet_ps import ResNetPS
+from .resnet_gwap import ResNetGWAP
 from .densenet_fcn import DenseNetFCN
-from .densenet_ps import DenseNetPS
+from .densenet_gwap import DenseNetGWAP
 
 models_map = {'resnet_fcn': ResNetFCN,
-              'resnet_ps': ResNetPS,
+              'resnet_gwap': ResNetGWAP,
               'densenet_fcn': DenseNetFCN,
-              'densenet_ps': DenseNetPS,
+              'densenet_gwap': DenseNetGWAP,
              }
 
 def get_model(args, cuda):

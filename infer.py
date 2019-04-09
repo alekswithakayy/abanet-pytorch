@@ -4,17 +4,19 @@ import cv2
 import sys
 import shutil
 import torch
+import scipy
 
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+import numpy as np
 
 from PIL import Image
 from models import model_factory
 from util import load_checkpoint
 from prm import PeakResponseMapping
 
-from os.path import isfile, isdir, join, splitext
-from collections import OrderedDict
+from os.path import isfile, isdir, join, splitext, basename
 from tqdm import tqdm
 
 
@@ -38,7 +40,7 @@ def run(infer_args, model_args):
 
     infer_args.classes = sorted(
         [l.strip() for l in open(infer_args.class_list, 'r').readlines()])
-
+    infer_args.backgnd_idx = infer_args.classes.index('background')
 
     ###############
     # Build Model #
@@ -74,8 +76,9 @@ def run(infer_args, model_args):
 
     model.eval()
 
-    for item in os.listdir(infer_args.inference_dir):
-        print('Processing: %s' % item)
+    dir_items = os.listdir(infer_args.inference_dir)
+    for i, item in enumerate(dir_items):
+        print('Processing: %s (%i/%i)' % (item, i+1, len(dir_items)))
 
         item_name, ext = splitext(item)
         item_path = join(infer_args.inference_dir, item)
@@ -92,6 +95,7 @@ def run(infer_args, model_args):
             print('\n')
 
         elif ext.lower() in VIDEO_EXTENSIONS:
+            #_process_video(item_path, model, infer_args)
             tmp_proc_dir = join(infer_args.inference_dir, 'tmp_proc_dir')
             if isdir(tmp_proc_dir): shutil.rmtree(tmp_proc_dir)
             os.mkdir(tmp_proc_dir)
@@ -112,7 +116,7 @@ def run(infer_args, model_args):
             print('\n')
 
         else:
-            print('%s is not a recognized file type, skipping...' % item)
+            print('%s is not a recognized file type, skipping...\n' % item)
             continue
 
         results_file.close()
@@ -126,18 +130,16 @@ def process_image(image_path, model, infer_args):
         return
 
     image = load_image(image_path)
-    input = transform_image(image, infer_args.image_size)
+    image = transform_image(image, infer_args.image_size, infer_args.crop)
+    input = transforms.ToTensor()(image).unsqueeze(0)
+    if infer_args.cuda:
+        input = input.cuda(async=True)
 
-    if infer_args.prm:
-        model = PeakResponseMapping(model)
-        logits, crms, peaks, prms = model(input)
-        _, idx = torch.max(logits, dim=1)
-        idx = idx.item()
-        class_ = infer_args.classes[idx]
-        visualize_prm(image, crms[0, idx], prms, class_, infer_args.results_dir, image_path)
+    if infer_args.visualize_results:
+        logits, activation_maps = model(input)
+        class_ = visualize_activation_map(image, logits, activation_maps, image_path, infer_args)
         return class_
     else:
-        # Get species
         output = model(input).squeeze()
         _, idx = torch.max(output, dim=0)
         idx = idx.item()
@@ -162,9 +164,10 @@ def process_directory(dir_path, model, infer_args):
 def process_video(video_path, tmp_proc_dir, model, infer_args):
     print('Extracting frames from video...')
 
-    _, ext = splitext(video_path)
-    if not ext.lower() in VIDEO_EXTENSIONS:
-        print('%s is not a recognized video type, skipping...' % path)
+    filename = basename(video_path)
+    filename, ext = splitext(filename)
+    if not ext.strip().lower() in VIDEO_EXTENSIONS:
+        print('%s is not a recognized video type, skipping...' % video_path)
         return
 
     frame_count = 0
@@ -175,7 +178,7 @@ def process_video(video_path, tmp_proc_dir, model, infer_args):
             frame_count += 1
             continue
         if isvalid:
-            frame_path = join(tmp_proc_dir, 'frame_%i.png' % frame_count)
+            frame_path = join(tmp_proc_dir, filename + 'frame_%i.png' % frame_count)
             cv2.imwrite(frame_path, frame)
             frame_count += 1
         else:
@@ -185,43 +188,209 @@ def process_video(video_path, tmp_proc_dir, model, infer_args):
     return process_directory(tmp_proc_dir, model, infer_args)
 
 
+def _process_video(video_path, model, infer_args):
+    print('Extracting frames from video...')
+
+    filename = basename(video_path)
+    filename, ext = splitext(filename)
+    if not ext.strip().lower() in VIDEO_EXTENSIONS:
+        print('%s is not a recognized video type, skipping...' % video_path)
+        return
+
+    video_cap = cv2.VideoCapture(video_path)
+
+    frames = []
+    frame_count = 0
+    while video_cap.isOpened():
+        isvalid, frame = video_cap.read()
+        if not (frame_count % infer_args.every_nth_frame == 0):
+            frame_count += 1
+            continue
+        if isvalid:
+            frames.append(frame)
+            frame_count += 1
+        else:
+            break
+    video_cap.release()
+
+    logits = []
+    activation_maps = []
+    batch = []
+    for i, frame in enumerate(frames):
+        image = Image.fromarray(frame)
+        image = transform_image(image, infer_args.image_size, infer_args.crop)
+        input = transforms.ToTensor()(image)
+        if infer_args.cuda:
+            input = input.cuda(async=True)
+        batch.append(input)
+
+        if (len(batch) == infer_args.batch_size) or (i == len(frames) - 1):
+            batch = torch.stack(batch)
+            l, am = model(batch)
+            logits.append(l.detach().cpu().numpy())
+            activation_maps.append(am.detach().cpu().numpy())
+            batch = []
+
+    if logits[-1].ndim == 1:
+        logits[-1] = np.expand_dims(logits[-1], 0)
+    logits = np.concatenate(logits)
+    activation_maps = np.concatenate(activation_maps)
+
+
+    class_per_frame = [-1]*len(frames)
+    top3_per_frame = np.flip(np.argsort(logits, axis=1)[:,-3:], axis=1)
+    scores = [0]*len(infer_args.classes)
+    for i, top3 in enumerate(top3_per_frame):
+        if top3[0] == infer_args.backgnd_idx:
+            class_per_frame[i] = infer_args.backgnd_idx
+            continue
+        score = 3
+        for j in top3.tolist():
+            if not j == infer_args.backgnd_idx:
+                scores[j] += score
+            score -= 1
+    max_score = max(scores)
+    if max_score == 0:
+        class_idx = infer_args.backgnd_idx
+    else:
+        class_idx = scores.index(max_score)
+    class_per_frame = [class_idx if i == -1 else i for i in class_per_frame]
+    print(scores)
+    print(infer_args.classes[class_idx])
+
+    class_activation_maps = activation_maps[:,class_idx,:,:].squeeze()
+    f, x, y = class_activation_maps.shape
+
+    for i in range(f):
+        class_activation_maps[i,:,:] = blur(class_activation_maps[i,:,:])
+    # mean = class_activation_maps.reshape(f*x*y).mean(axis=0)
+    # std = class_activation_maps.reshape(f*x*y).std(axis=0)
+    # class_activation_maps = class_activation_maps > (mean + 1.0 * std)
+    # class_activation_maps = class_activation_maps.astype(int)
+
+    # Animal presence
+    presence = class_activation_maps.reshape(f, x*y).mean(axis=1).tolist()
+
+    # Volatility
+    diff = np.abs(class_activation_maps[1:,:,:] - class_activation_maps[:-1,:,:])
+    volatility = diff.reshape(f-1, x*y).mean(axis=1).tolist()
+    volatility.insert(0, 0.0)
+
+    if infer_args.visualize_results:
+        create_video_visualization(video_path, class_per_frame, presence, volatility, infer_args)
+
+
+def create_video_visualization(video_path, class_per_frame, presence, volatility, infer_args):
+    video_cap = cv2.VideoCapture(video_path)
+    length = int(video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = int(video_cap.get(cv2.CAP_PROP_FPS))
+
+    name, ext = splitext(basename(video_path))
+    new_video_path = join(infer_args.results_dir, name + '_result' + ext.lower())
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    results_video = cv2.VideoWriter(new_video_path, fourcc, fps, (width, height))
+
+    font_scale = 0.8
+    font_color = (0,0,255)
+    line_type = 2
+
+    frame_count = 0
+    while video_cap.isOpened():
+        isvalid, frame = video_cap.read()
+        if isvalid and class_per_frame:
+            if frame_count % infer_args.every_nth_frame == 0:
+                i = class_per_frame.pop(0)
+                p = presence.pop(0)
+                v = volatility.pop(0)
+                frame_count += 1
+            text = []
+            text.append('Class=%s' % infer_args.classes[i])
+            text.append('Presence=%.3f' % p)
+            text.append('Volatility=%.3f' % v)
+            text_loc = (20,60)
+            for t in text:
+                cv2.putText(frame, t, text_loc, cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale, font_color, line_type)
+                text_loc = (text_loc[0], text_loc[1] + 50)
+            frame_count += 1
+        else:
+            break
+        results_video.write(frame)
+
+    video_cap.release()
+    results_video.release()
+    cv2.destroyAllWindows()
+
+
+def visualize_activation_map(image, logits, activation_maps, image_path, infer_args):
+    _, idx = torch.max(logits.squeeze(), dim=0)
+    class_idx = idx.item()
+    class_ = infer_args.classes[class_idx]
+    backgnd_idx = infer_args.classes.index('background')
+
+    activation_maps = activation_maps.detach()
+    b, c, h, w = activation_maps.size()
+    O_c = F.softmax(activation_maps, dim=1)
+    M_c = O_c * torch.sigmoid(activation_maps)
+    alpha_c = F.softmax(M_c.view(b, c, h*w), dim=2)
+    activation_maps = alpha_c.view(b, c, h, w) * activation_maps
+    activation_maps = activation_maps.squeeze()
+
+    class_map = activation_maps[class_idx,:,:]
+    backgnd_map = activation_maps[backgnd_idx,:,:]
+
+    _, axarr = plt.subplots(1, 3, figsize=(12,4))
+
+    # Display input image
+    axarr[0].imshow(image)
+    axarr[0].set_title('Image', size=6)
+    axarr[0].axis('off')
+
+    # Display class response map
+    axarr[1].imshow(class_map.cpu(), interpolation='bicubic')
+    axarr[1].set_title('Class Response ("%s")' % class_, size=6)
+    axarr[1].axis('off')
+
+    # Display background response map
+    axarr[2].imshow(backgnd_map.cpu(), interpolation='bicubic')
+    axarr[2].set_title('Class Response ("background")', size=6)
+    axarr[2].axis('off')
+
+    filename = basename(image_path)
+    filename, _ = filename.rsplit('.', 1)
+    plt.savefig(join(infer_args.results_dir, filename) + '.png', dpi=300)
+    plt.close()
+
+    return class_
+
+
 def load_image(path):
     with open(path, 'rb') as f:
         image = Image.open(f)
         return image.convert('RGB')
 
 
-def transform_image(image, size):
+def transform_image(image, size, crop):
+    if crop:
+        image = image.crop(crop)
     if size:
-        image = transforms.Resize((size, size), Image.ANTIALIAS)(image)
-    image = transforms.ToTensor()(image).unsqueeze(0)
+        image = transforms.Resize(size, Image.ANTIALIAS)(image)
     return image
 
+def blur(a):
+    kernel = np.array([[1.0,2.0,1.0], [2.0,4.0,2.0], [1.0,2.0,1.0]])
+    kernel = kernel / np.sum(kernel)
+    arraylist = []
+    for y in range(3):
+        temparray = np.copy(a)
+        temparray = np.roll(temparray, y - 1, axis=0)
+        for x in range(3):
+            temparray_X = np.copy(temparray)
+            temparray_X = np.roll(temparray_X, x - 1, axis=1)*kernel[y,x]
+            arraylist.append(temparray_X)
 
-# Archiving this method here for now
-def visualize_prm(image, crm, prms, class_, results_dir, image_path):
-        f, axarr = plt.subplots(3, 3, figsize=(7,7))
-
-        # Display input image
-        axarr[0,0].imshow(image)
-        axarr[0,0].set_title('Image', size=6)
-        axarr[0,0].axis('off')
-
-        # Display class response maps
-        axarr[0,1].imshow(crm.cpu(), interpolation='bicubic')
-        axarr[0,1].set_title('Class Response ("%s")' % class_, size=6)
-        axarr[0,1].axis('off')
-
-        count = 0
-        for i in range(1,3):
-            for j in range(0,3):
-                if count < len(prms):
-                    axarr[i, j].imshow(prms[count].cpu(), cmap=plt.cm.jet)
-                    axarr[i, j].set_title('Peak Response ("%s")' % class_, size=6)
-                    count += 1
-                axarr[i,j].axis('off')
-
-        filename = os.path.basename(image_path)
-        filename, _ = filename.rsplit('.', 1)
-        plt.savefig(os.path.join(results_dir, filename) + '.png', dpi=300)
-        plt.close()
+    arraylist = np.array(arraylist)
+    arraylist_sum = np.sum(arraylist, axis=0)
+    return arraylist_sum
