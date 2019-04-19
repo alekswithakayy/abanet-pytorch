@@ -186,12 +186,21 @@ def add_infer_args(parser):
                         default=30,
                         type=int,
                         help='Process every nth frame in a video.')
+    parser.add_argument('--num_threads',
+                        default=4,
+                        type=int,
+                        help='Number of data preprocessing threads.')
     parser.add_argument('--crop',
                         default='',
                         type=str,
                         help='Crops rectangular region from input image. The '
                         'box is a 4-tuple defining the left, upper, right, and '
                         'lower pixel coordinate.')
+    parser.add_argument('--six_crop',
+                        default=False,
+                        type=str2bool,
+                        help='Crop input image/video six ways - the four '
+                        'corners, center and full image')
     parser.add_argument('--image_size',
                         default=None,
                         type=str,
@@ -210,7 +219,8 @@ def add_infer_args(parser):
 
 def clean_infer_args(args):
     args.image_size = [int(s) for s in args.image_size.split(',')]
-    args.crop = [int(s) for s in args.crop.split(',')]
+    if args.crop:
+        args.crop = [int(s) for s in args.crop.split(',')]
     return args
 
 
