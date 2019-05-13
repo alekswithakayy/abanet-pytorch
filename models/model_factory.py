@@ -6,11 +6,13 @@ from .resnet_fcn import ResNetFCN
 from .resnet_gwap import ResNetGWAP
 from .densenet_fcn import DenseNetFCN
 from .densenet_gwap import DenseNetGWAP
+from .irnet import IRNet
 
 models_map = {'resnet_fcn': ResNetFCN,
               'resnet_gwap': ResNetGWAP,
               'densenet_fcn': DenseNetFCN,
               'densenet_gwap': DenseNetGWAP,
+              'irnet': IRNet,
              }
 
 def get_model(args, cuda):

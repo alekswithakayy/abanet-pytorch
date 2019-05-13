@@ -5,6 +5,7 @@ import sys
 import shutil
 import torch
 import skimage
+import scipy
 import time
 
 import torch.nn.functional as F
@@ -14,12 +15,13 @@ import numpy as np
 
 from models import model_factory
 from util import load_checkpoint
-from prm import PeakResponseMapping
 
 from os.path import isfile, isdir, join, splitext, basename
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from apex import amp
+from pydensecrf import densecrf
+from pydensecrf.utils import unary_from_softmax
 
 IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png']
 VIDEO_EXTENSIONS = ['.mp4']
@@ -88,7 +90,7 @@ def run(infer_args, model_args):
         item_name, ext = splitext(item)
         item_path = join(infer_args.inference_dir, item)
 
-        results_file = open(join(infer_args.results_dir, item_name + '.csv'), 'w')
+        #results_file = open(join(infer_args.results_dir, item_name + '.csv'), 'w')
 
         if ext.lower() in IMAGE_EXTENSIONS:
             process_image(item_path, model, infer_args)
@@ -98,7 +100,7 @@ def run(infer_args, model_args):
             print('%s is not a recognized file type, skipping...\n' % item)
             continue
 
-        results_file.close()
+        #results_file.close()
 
 
 def process_image(image_path, model, infer_args):
@@ -116,11 +118,36 @@ def process_image(image_path, model, infer_args):
         input = input.cuda(async=True)
 
     logits, act_maps = model(input)
+
     _, top1_idx = torch.max(logits, dim=0)
     top1_idx = top1_idx.item()
     top1_class = infer_args.classes[top1_idx]
 
-    top1_act_map = act_maps[0,top1_idx,:,:].detach().cpu().numpy()
+    act_maps = act_maps.squeeze()
+    c, h, w = act_maps.size()
+    M_c = F.softmax(act_maps, dim=0) * torch.sigmoid(act_maps)
+    alpha_c = F.softmax(M_c.view(c, h*w), dim=1)
+    act_maps = alpha_c.view(c, h, w)
+
+    # top1_act_map = act_maps[top1_idx,:,:].detach().cpu().numpy()
+    # top1_act_map = resize(top1_act_map, infer_args.image_size)
+    # bgnd_act_map = (np.max(top1_act_map.flatten()) - top1_act_map) * 2.0
+    # maps = np.stack([top1_act_map, bgnd_act_map], axis=0)
+
+    # maps = act_maps.detach().cpu().numpy()
+    # infer_args.six_crop = False
+    # maps = interpolate_activation_maps(maps, infer_args)
+
+    # c, h, w = maps.shape
+    # crf = densecrf.DenseCRF2D(w, h, c)
+    # U = unary_from_softmax(maps)
+    # crf.setUnaryEnergy(U)
+    # crf.addPairwiseBilateral(sxy=80, srgb=13, rgbim=np.uint8(image*255), compat=10)
+    # Q = crf.inference(5)
+    # map = np.argmax(Q, axis=0).reshape(infer_args.image_size)
+    # top1_act_map = (map == 0)
+
+    top1_act_map = act_maps[top1_idx,:,:].detach().cpu().numpy()
     top1_act_map = resize(top1_act_map, infer_args.image_size)
     thresh = skimage.filters.threshold_otsu(top1_act_map)
     top1_act_map = top1_act_map > thresh
@@ -172,7 +199,15 @@ def process_video(video_path, model, infer_args):
             batch = torch.stack(batch)
             if infer_args.cuda:
                 batch = batch.cuda(async=True)
+
             logit, act_map = model(batch)
+
+            b, c, h, w = act_map.size()
+            O_c = F.softmax(act_map, dim=1)
+            M_c = O_c * torch.sigmoid(act_map)
+            alpha_c = F.softmax(M_c.view(b, c, h*w), dim=2)
+            act_map = alpha_c.view(b, c, h, w) * act_map
+
             logits.append(logit.detach().cpu().numpy())
             act_maps.append(act_map.detach().cpu().numpy())
 
@@ -181,9 +216,27 @@ def process_video(video_path, model, infer_args):
     logits = np.concatenate(logits)
     frame_labels, top1_idx = label_frames(logits, infer_args)
 
+    # act_maps = np.concatenate(act_maps)
+    # top1_act_maps = []
+    # for i in range(len(act_maps)):
+    #     maps = interpolate_activation_maps(act_maps[i], infer_args)
+    #     c, h, w = maps.shape
+    #     crf = densecrf.DenseCRF2D(w, h, c)
+    #     U = unary_from_softmax(maps)
+    #     crf.setUnaryEnergy(U)
+    #     crf.addPairwiseBilateral(sxy=80, srgb=13, rgbim=np.uint8(frames[i]*255), compat=10)
+    #     Q = crf.inference(5)
+    #     map = np.argmax(Q, axis=0).reshape(infer_args.image_size)
+    #     map = (map == top1_idx)
+    #     top1_act_maps.append(map)
+    #     print('done %i' % i)
+    # top1_act_maps = np.array(top1_act_maps, dtype=np.uint8)
+
     act_maps = np.concatenate(act_maps)
     top1_act_maps = act_maps[:,top1_idx,:,:].squeeze()
     top1_act_maps = interpolate_activation_maps(top1_act_maps, infer_args)
+    top1_act_maps = scipy.ndimage.filters.gaussian_filter1d(
+        top1_act_maps, 2.0, axis=0)
 
     thresh = skimage.filters.threshold_otsu(top1_act_maps)
     top1_act_maps = np.uint8(top1_act_maps > thresh)
@@ -191,12 +244,12 @@ def process_video(video_path, model, infer_args):
     f,x,y = top1_act_maps.shape
     presence = top1_act_maps.reshape(f, x*y).mean(axis=1).tolist()
     delta = np.abs(top1_act_maps[1:,:,:] - top1_act_maps[:-1,:,:])
-    volatility = delta.reshape(f-1, x*y).mean(axis=1).tolist()
-    volatility.insert(0, 0.0)
+    movement = delta.reshape(f-1, x*y).mean(axis=1).tolist()
+    movement.insert(0, 0.0)
 
     if infer_args.visualize_results:
         visualize_video_results(video_path, top1_act_maps, frame_labels,
-            presence, volatility, infer_args)
+            presence, movement, infer_args)
 
 
 def extract_frames(video_path, infer_args):
@@ -294,7 +347,7 @@ def interpolate_activation_maps(maps, infer_args, order=1):
 
 
 def visualize_video_results(video_path, top1_act_maps, class_per_frame,
-    presence, volatility, infer_args):
+    presence, movement, infer_args):
     # Store video parameters
     video_capture = cv2.VideoCapture(video_path)
     length = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -325,9 +378,9 @@ def visualize_video_results(video_path, top1_act_maps, class_per_frame,
                 overlay = np.zeros((height, width, 3), dtype=np.bool_)
                 for i in range(3):
                     overlay[:,:,i] = map
-                # Create presence and volatility plots
+                # Create presence and movement plots
                 cur_class = infer_args.classes[class_per_frame[idx]]
-                plot = plot_as_array(idx, cur_class, presence, volatility)
+                plot = plot_as_array(idx, cur_class, presence, movement)
             # Edit frame with overlay and plot
             frame = crop(frame, infer_args.crop)
             frame_overlay = np.uint8(np.copy(frame)*np.invert(overlay) + overlay*255)
@@ -343,7 +396,7 @@ def visualize_video_results(video_path, top1_act_maps, class_per_frame,
     cv2.destroyAllWindows()
 
 
-def plot_as_array(i, cur_class, presence, volatility):
+def plot_as_array(i, cur_class, presence, movement):
     fig = plt.figure(figsize=(8,2))
 
     presence_plot = fig.add_subplot(121)
@@ -353,10 +406,10 @@ def plot_as_array(i, cur_class, presence, volatility):
     presence_plot.set_ylim(bottom=0, top=max(presence)*1.25)
 
     volatility_plot = fig.add_subplot(122)
-    volatility_plot.plot(range(i), volatility[:i])
-    volatility_plot.set_title("Volatility")
-    volatility_plot.set_xlim(left=0, right=len(volatility))
-    volatility_plot.set_ylim(bottom=0, top=max(volatility)*1.25)
+    volatility_plot.plot(range(i), movement[:i])
+    volatility_plot.set_title("Movement")
+    volatility_plot.set_xlim(left=0, right=len(movement))
+    volatility_plot.set_ylim(bottom=0, top=max(movement)*1.25)
 
     fig.canvas.draw()
     w, h = fig.canvas.get_width_height()
@@ -375,6 +428,7 @@ def load_image(path):
     image = skimage.io.imread(path)
     if image.shape[2] == 4:
         image = skimage.color.rgba2rgb(image)
+        image = np.uint8(image * 255)
     return image
 
 
