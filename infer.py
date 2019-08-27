@@ -27,7 +27,7 @@ IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png']
 VIDEO_EXTENSIONS = ['.mp4']
 
 
-def run(infer_args, model_args):
+def run(args):
 
     ##############
     # Initialize #
@@ -35,15 +35,15 @@ def run(infer_args, model_args):
 
     print('** Initializing inference engine **')
 
-    infer_args.cuda = torch.cuda.is_available()
+    args.cuda = torch.cuda.is_available()
 
-    for key, value in vars(infer_args).items():
+    for key, value in vars(args).items():
         print('{:20s}{:s}'.format(key, str(value)))
     print()
 
-    infer_args.classes = sorted(
-        [l.strip() for l in open(infer_args.class_list, 'r').readlines()])
-    infer_args.backgnd_idx = infer_args.classes.index('background')
+    args.classes = sorted(
+        [l.strip() for l in open(args.class_list, 'r').readlines()])
+    args.backgnd_idx = args.classes.index('background')
 
     ###############
     # Build Model #
@@ -51,21 +51,17 @@ def run(infer_args, model_args):
 
     print('** Building model **')
 
-    for key, value in vars(model_args).items():
-        print('{:20s}{:s}'.format(key, str(value)))
-    print()
-
     # Define model
-    model = model_factory.get_model(model_args, infer_args.cuda)
+    model = model_factory.get_model(args)
 
     # Attempt to load model from checkpoint
-    if model_args.checkpoint and os.path.isfile(model_args.checkpoint):
-        print('Checkpoint found at: %s' % model_args.checkpoint)
-        model, _, _ = load_checkpoint(model, model_args.checkpoint,
-            infer_args.cuda)
+    if args.checkpoint and os.path.isfile(args.checkpoint):
+        print('Checkpoint found at: %s' % args.checkpoint)
+        model, _, _ = load_checkpoint(model, args.checkpoint,
+            args.cuda)
         print('Checkpoint successfully loaded')
     else:
-        print('No checkpoint found at: %s' % model_args.checkpoint)
+        print('No checkpoint found at: %s' % args.checkpoint)
         print('Halting inference')
         return
     print()
@@ -83,19 +79,19 @@ def run(infer_args, model_args):
 
     model.eval()
 
-    dir_items = os.listdir(infer_args.inference_dir)
+    dir_items = os.listdir(args.inference_dir)
     for i, item in enumerate(dir_items):
         print('Processing: %s (%i/%i)' % (item, i+1, len(dir_items)))
 
         item_name, ext = splitext(item)
-        item_path = join(infer_args.inference_dir, item)
+        item_path = join(args.inference_dir, item)
 
-        #results_file = open(join(infer_args.results_dir, item_name + '.csv'), 'w')
+        #results_file = open(join(args.results_dir, item_name + '.csv'), 'w')
 
         if ext.lower() in IMAGE_EXTENSIONS:
-            process_image(item_path, model, infer_args)
+            process_image(item_path, model, args)
         elif ext.lower() in VIDEO_EXTENSIONS:
-            process_video(item_path, model, infer_args)
+            process_video(item_path, model, args)
         else:
             print('%s is not a recognized file type, skipping...\n' % item)
             continue
@@ -103,7 +99,7 @@ def run(infer_args, model_args):
         #results_file.close()
 
 
-def process_image(image_path, model, infer_args):
+def process_image(image_path, model, args):
     image_name = basename(image_path)
     image_name, ext = splitext(image_name)
     if not ext.lower() in IMAGE_EXTENSIONS:
@@ -111,17 +107,17 @@ def process_image(image_path, model, infer_args):
         return
 
     image = load_image(image_path)
-    image = crop(image, infer_args.crop)
-    image = resize(image, infer_args.image_size)
+    image = crop(image, args.infer_crop)
+    image = resize(image, args.infer_image_size)
     input = transforms.ToTensor()(image).unsqueeze(0).contiguous().float()
-    if infer_args.cuda:
+    if args.cuda:
         input = input.cuda(async=True)
 
     logits, act_maps = model(input)
 
     _, top1_idx = torch.max(logits, dim=0)
     top1_idx = top1_idx.item()
-    top1_class = infer_args.classes[top1_idx]
+    top1_class = args.classes[top1_idx]
 
     act_maps = act_maps.squeeze()
     c, h, w = act_maps.size()
@@ -130,13 +126,13 @@ def process_image(image_path, model, infer_args):
     act_maps = alpha_c.view(c, h, w)
 
     # top1_act_map = act_maps[top1_idx,:,:].detach().cpu().numpy()
-    # top1_act_map = resize(top1_act_map, infer_args.image_size)
+    # top1_act_map = resize(top1_act_map, args.infer_image_size)
     # bgnd_act_map = (np.max(top1_act_map.flatten()) - top1_act_map) * 2.0
     # maps = np.stack([top1_act_map, bgnd_act_map], axis=0)
 
     # maps = act_maps.detach().cpu().numpy()
-    # infer_args.six_crop = False
-    # maps = interpolate_activation_maps(maps, infer_args)
+    # args.six_crop = False
+    # maps = interpolate_activation_maps(maps, args)
 
     # c, h, w = maps.shape
     # crf = densecrf.DenseCRF2D(w, h, c)
@@ -144,21 +140,21 @@ def process_image(image_path, model, infer_args):
     # crf.setUnaryEnergy(U)
     # crf.addPairwiseBilateral(sxy=80, srgb=13, rgbim=np.uint8(image*255), compat=10)
     # Q = crf.inference(5)
-    # map = np.argmax(Q, axis=0).reshape(infer_args.image_size)
+    # map = np.argmax(Q, axis=0).reshape(args.infer_image_size)
     # top1_act_map = (map == 0)
 
     top1_act_map = act_maps[top1_idx,:,:].detach().cpu().numpy()
-    top1_act_map = resize(top1_act_map, infer_args.image_size)
+    top1_act_map = resize(top1_act_map, args.infer_image_size)
     thresh = skimage.filters.threshold_otsu(top1_act_map)
     top1_act_map = top1_act_map > thresh
 
-    if infer_args.visualize_results:
-        visualize_image_results(image_path, top1_class, top1_act_map, infer_args)
+    if args.visualize_results:
+        visualize_image_results(image_path, top1_class, top1_act_map, args)
 
 
-def visualize_image_results(image_path, top1_class, top1_act_map, infer_args):
+def visualize_image_results(image_path, top1_class, top1_act_map, args):
     image = load_image(image_path)
-    image = crop(image, infer_args.crop)
+    image = crop(image, args.infer_crop)
 
     h, w, c = image.shape
     map = resize(top1_act_map, (h, w), order=0)
@@ -175,29 +171,29 @@ def visualize_image_results(image_path, top1_class, top1_act_map, infer_args):
 
     filename = basename(image_path)
     filename, _ = filename.rsplit('.', 1)
-    plt.savefig(join(infer_args.results_dir, filename) + '.png', dpi=300)
+    plt.savefig(join(args.results_dir, filename) + '.png', dfi=300)
     plt.close()
 
 
-def process_video(video_path, model, infer_args):
+def process_video(video_path, model, args):
     video_name = basename(video_path)
     video_name, ext = splitext(video_name)
     if not ext.strip().lower() in VIDEO_EXTENSIONS:
         print('%s is not a recognized video type, skipping...' % video_name)
         return
 
-    frames = extract_frames(video_path, infer_args)
-    frames = preprocess_frames(frames, infer_args)
+    frames = extract_frames(video_path, args)
+    frames = preprocess_frames(frames, args)
 
     logits = []
     act_maps = []
     with torch.no_grad():
         to_tensor = transforms.ToTensor()
-        for i in range(0, len(frames), infer_args.batch_size):
-            batch = frames[i:i+infer_args.batch_size]
+        for i in range(0, len(frames), args.infer_batch_size):
+            batch = frames[i:i+args.infer_batch_size]
             batch = [to_tensor(frame).contiguous().float() for frame in batch]
             batch = torch.stack(batch)
-            if infer_args.cuda:
+            if args.cuda:
                 batch = batch.cuda(async=True)
 
             logit, act_map = model(batch)
@@ -214,19 +210,19 @@ def process_video(video_path, model, infer_args):
     if logits[-1].ndim == 1:
         logits[-1] = np.expand_dims(logits[-1], 0)
     logits = np.concatenate(logits)
-    frame_labels, top1_idx = label_frames(logits, infer_args)
+    frame_labels, top1_idx = label_frames(logits, args)
 
     # act_maps = np.concatenate(act_maps)
     # top1_act_maps = []
     # for i in range(len(act_maps)):
-    #     maps = interpolate_activation_maps(act_maps[i], infer_args)
+    #     maps = interpolate_activation_maps(act_maps[i], args)
     #     c, h, w = maps.shape
     #     crf = densecrf.DenseCRF2D(w, h, c)
     #     U = unary_from_softmax(maps)
     #     crf.setUnaryEnergy(U)
     #     crf.addPairwiseBilateral(sxy=80, srgb=13, rgbim=np.uint8(frames[i]*255), compat=10)
     #     Q = crf.inference(5)
-    #     map = np.argmax(Q, axis=0).reshape(infer_args.image_size)
+    #     map = np.argmax(Q, axis=0).reshape(args.infer_image_size)
     #     map = (map == top1_idx)
     #     top1_act_maps.append(map)
     #     print('done %i' % i)
@@ -234,7 +230,7 @@ def process_video(video_path, model, infer_args):
 
     act_maps = np.concatenate(act_maps)
     top1_act_maps = act_maps[:,top1_idx,:,:].squeeze()
-    top1_act_maps = interpolate_activation_maps(top1_act_maps, infer_args)
+    top1_act_maps = interpolate_activation_maps(top1_act_maps, args)
     top1_act_maps = scipy.ndimage.filters.gaussian_filter1d(
         top1_act_maps, 2.0, axis=0)
 
@@ -247,18 +243,18 @@ def process_video(video_path, model, infer_args):
     movement = delta.reshape(f-1, x*y).mean(axis=1).tolist()
     movement.insert(0, 0.0)
 
-    if infer_args.visualize_results:
+    if args.visualize_results:
         visualize_video_results(video_path, top1_act_maps, frame_labels,
-            presence, movement, infer_args)
+            presence, movement, args)
 
 
-def extract_frames(video_path, infer_args):
+def extract_frames(video_path, args):
     video_capture = cv2.VideoCapture(video_path)
     frames = []
     frame_count = 0
     while video_capture.isOpened():
         isvalid, frame = video_capture.read()
-        if not (frame_count % infer_args.every_nth_frame == 0):
+        if not (frame_count % args.every_nth_frame == 0):
             frame_count += 1
             continue
         if isvalid:
@@ -272,53 +268,53 @@ def extract_frames(video_path, infer_args):
     return frames
 
 
-def _preprocess_frame(i, frame, processed, infer_args):
-    frame = crop(frame, infer_args.crop)
-    if infer_args.six_crop:
-        sections = [resize(c, infer_args.image_size) for c in six_crop(frame)]
+def _preprocess_frame(i, frame, processed, args):
+    frame = crop(frame, args.infer_crop)
+    if args.six_crop:
+        sections = [resize(c, args.infer_image_size) for c in six_crop(frame)]
         processed[i] = sections
     else:
-        frame = resize(frame, infer_args.image_size)
+        frame = resize(frame, args.infer_image_size)
         processed[i] = [frame]
 
 
-def preprocess_frames(frames, infer_args):
+def preprocess_frames(frames, args):
     processed = [[]]*len(frames)
-    with ThreadPoolExecutor(max_workers=infer_args.num_threads) as executor:
+    with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
         for i, frame in enumerate(frames):
-            executor.submit(_preprocess_frame, i, frame, processed, infer_args)
+            executor.submit(_preprocess_frame, i, frame, processed, args)
     return [i for f in processed for i in f]
 
 
-def label_frames(logits, infer_args):
-    class_scores = [0]*len(infer_args.classes)
+def label_frames(logits, args):
+    class_scores = [0]*len(args.classes)
     top1_per_image = [-1]*len(logits)
     top3_per_image = np.flip(np.argsort(logits, axis=1)[:,-3:], axis=1)
     for i, top3 in enumerate(top3_per_image):
         # If background is top1, immediately label image as background
-        if top3[0] == infer_args.backgnd_idx:
-            top1_per_image[i] = infer_args.backgnd_idx
+        if top3[0] == args.backgnd_idx:
+            top1_per_image[i] = args.backgnd_idx
             continue
         # Top scoring class = 3 points, second = 2 points, third = 1 point
         for j, idx in enumerate(top3.tolist()):
-            if idx != infer_args.backgnd_idx:
+            if idx != args.backgnd_idx:
                 class_scores[idx] += 3 - j
     for i, score in enumerate(class_scores):
-        if score: print('\t%s: %i' % (infer_args.classes[i], score))
+        if score: print('\t%s: %i' % (args.classes[i], score))
 
     # Find index of overall top scoring class
     max_score = max(class_scores)
     if max_score == 0:
-        top1_idx = infer_args.backgnd_idx
+        top1_idx = args.backgnd_idx
     else:
         top1_idx = class_scores.index(max_score)
 
     # Label each frame as top1_idx or backgnd_idx
     frame_labels = []
-    if infer_args.six_crop:
+    if args.six_crop:
         for i in range(0, len(top1_per_image), 6):
-            if sum(top1_per_image[i:i+6]) / 6 == infer_args.backgnd_idx:
-                frame_labels.append(infer_args.backgnd_idx)
+            if sum(top1_per_image[i:i+6]) / 6 == args.backgnd_idx:
+                frame_labels.append(args.backgnd_idx)
             else:
                 frame_labels.append(top1_idx)
     else:
@@ -327,10 +323,10 @@ def label_frames(logits, infer_args):
     return frame_labels, top1_idx
 
 
-def interpolate_activation_maps(maps, infer_args, order=1):
-    size = infer_args.image_size
+def interpolate_activation_maps(maps, args, order=1):
+    size = args.infer_image_size
     interpolated_maps = []
-    if infer_args.six_crop:
+    if args.six_crop:
         section_size = [int(size[0]*0.6), int(size[1]*0.6)]
         for i in range(0, len(maps), 6):
             to_merge = []
@@ -347,13 +343,13 @@ def interpolate_activation_maps(maps, infer_args, order=1):
 
 
 def visualize_video_results(video_path, top1_act_maps, class_per_frame,
-    presence, movement, infer_args):
+    presence, movement, args):
     # Store video parameters
     video_capture = cv2.VideoCapture(video_path)
     length = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = int(video_capture.get(cv2.CAP_PROP_FPS))
-    if infer_args.crop:
-        x1, y1, x2, y2 = infer_args.crop
+    if args.infer_crop:
+        x1, y1, x2, y2 = args.infer_crop
         width = x2 - x1
         height = y2 - y1
     else:
@@ -362,7 +358,7 @@ def visualize_video_results(video_path, top1_act_maps, class_per_frame,
 
     # Initialize output video
     name, ext = splitext(basename(video_path))
-    new_video_path = join(infer_args.results_dir, name + '_result' + ext.lower())
+    new_video_path = join(args.results_dir, name + '_result' + ext.lower())
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video_writer = cv2.VideoWriter(new_video_path, fourcc, fps, (width, height))
 
@@ -371,18 +367,18 @@ def visualize_video_results(video_path, top1_act_maps, class_per_frame,
     while video_capture.isOpened():
         isvalid, frame = video_capture.read()
         if isvalid and class_per_frame:
-            if frame_count % infer_args.every_nth_frame == 0:
-                idx = frame_count // infer_args.every_nth_frame
+            if frame_count % args.every_nth_frame == 0:
+                idx = frame_count // args.every_nth_frame
                 # Create class attention overlay
                 map = resize(top1_act_maps[idx], (height, width), order=0)
                 overlay = np.zeros((height, width, 3), dtype=np.bool_)
                 for i in range(3):
                     overlay[:,:,i] = map
                 # Create presence and movement plots
-                cur_class = infer_args.classes[class_per_frame[idx]]
+                cur_class = args.classes[class_per_frame[idx]]
                 plot = plot_as_array(idx, cur_class, presence, movement)
             # Edit frame with overlay and plot
-            frame = crop(frame, infer_args.crop)
+            frame = crop(frame, args.infer_crop)
             frame_overlay = np.uint8(np.copy(frame)*np.invert(overlay) + overlay*255)
             frame = cv2.addWeighted(frame, 0.6, frame_overlay, 0.4, 0)
             frame[-200:,-800:,:] = plot

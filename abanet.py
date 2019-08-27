@@ -1,53 +1,28 @@
-import sys
-import argparse
-import configparser
+from util.parser import collect_args
 
-import train
-import test
-import infer
+import torch
+import train_cam
+import make_cam
+import make_ir_label
+import train_irn
+import irn_inference
 
-from util.parser import get_section_parser, clean_section_args
+if __name__ == '__main__':
+    torch.multiprocessing.freeze_support()
+    args = collect_args()
+    args.cuda = args.num_gpus > 0
 
-# Parse command line arguments as meta_args
-parser = argparse.ArgumentParser()
-parser.add_argument('--config_filepath', '-c',
-                    required=True,
-                    type=str,
-                    help='Path to system configuration file.')
-meta_args, args_from_cmdline = parser.parse_known_args()
-
-# Parse configuration file arguments
-config = configparser.ConfigParser()
-config.read([meta_args.config_filepath])
-
-def get_section_args(section_name):
-    parser = get_section_parser(section_name)
-    # Set args from config file
-    parser.set_defaults(**dict(config.items(section_name)))
-    # Command line args override config file
-    args, _ = parser.parse_known_args(args_from_cmdline)
-    args = clean_section_args(args, section_name)
-    return args
-
-system_args = get_section_args('SYSTEM')
-dataset_args = get_section_args('DATASET')
-model_args = get_section_args('MODEL')
-
-if system_args.output_file:
-    file = open(system_args.output_file, 'w+')
-    sys.stdout = file
-
-if system_args.train:
-    train_args = get_section_args('TRAIN')
-    train.run(train_args, dataset_args, model_args)
-
-if system_args.test:
-    test_args = get_section_args('TEST')
-    test.run(test_args, dataset_args, model_args)
-
-if system_args.infer:
-    infer_args = get_section_args('INFER')
-    infer.run(infer_args, model_args)
-
-if system_args.output_file:
-    file.close()
+    if args.train_cam:
+        train_cam.run(args)
+    if args.make_cam:
+        make_cam.run(args)
+    if args.make_ir_label:
+        make_ir_label.run(args)
+    if args.train_irn:
+        train_irn.run(args)
+    if args.make_ins_seg_labels:
+        pass
+    if args.make_sem_seg_labels:
+        pass
+    if args.irn_inference:
+        irn_inference.run(args)

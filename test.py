@@ -14,7 +14,7 @@ from util.sampler import ImbalancedDatasetSampler
 from util import load_checkpoint, accuracy, AverageMeter
 
 
-def run(test_args, dataset_args, model_args):
+def run(args):
 
     ##############
     # Initialize #
@@ -22,9 +22,7 @@ def run(test_args, dataset_args, model_args):
 
     print('** Initializing testing engine **')
 
-    test_args.cuda = torch.cuda.is_available()
-
-    for key, value in vars(test_args).items():
+    for key, value in vars(args).items():
         print('{:20s}{:s}'.format(key, str(value)))
     print()
 
@@ -35,10 +33,10 @@ def run(test_args, dataset_args, model_args):
 
     print('** Loading dataset **')
 
-    dataset = dataset_factory.get_dataset('test', dataset_args)
-    dataloader = DataLoader(dataset, batch_size=dataset_args.batch_size,
-        shuffle=False, num_workers=dataset_args.num_threads,
-        pin_memory=test_args.cuda)
+    dataset = dataset_factory.get_dataset('test', args)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size,
+        shuffle=False, num_workers=args.num_threads,
+        pin_memory=args.cuda)
 
     print('Found %s samples in testing set' % len(dataset))
     print()
@@ -50,24 +48,23 @@ def run(test_args, dataset_args, model_args):
 
     print('** Building model **')
 
-    for key, value in vars(model_args).items():
+    for key, value in vars(args).items():
         print('{:20s}{:s}'.format(key, str(value)))
     print()
 
     # Define model
-    model = model_factory.get_model(model_args, test_args.cuda)
+    model = model_factory.get_model(args)
 
     # Define loss function
-    criterion = criterion_factory.get_criterion(test_args)
+    criterion = criterion_factory.get_criterion(args)
 
     # Attempt to load model from checkpoint
-    if model_args.checkpoint and os.path.isfile(model_args.checkpoint):
-        print('Checkpoint found at: %s' % model_args.checkpoint)
-        model, _, _ = load_checkpoint(model, model_args.checkpoint,
-            test_args.cuda)
+    if args.checkpoint and os.path.isfile(args.checkpoint):
+        print('Checkpoint found at: %s' % args.checkpoint)
+        model, _, _ = load_checkpoint(model, args.checkpoint, args.cuda)
         print('Checkpoint successfully loaded')
     else:
-        print('No checkpoint found at: %s' % model_args.checkpoint)
+        print('No checkpoint found at: %s' % args.checkpoint)
         print('Halting testing')
         return
     print()
@@ -85,7 +82,7 @@ def run(test_args, dataset_args, model_args):
 
     model.eval()
 
-    test(model, dataloader, criterion, test_args.cuda, test_args.print_freq)
+    test(model, dataloader, criterion, args.cuda, args.test_print_freq)
 
 
 def test(model, dataloader, criterion, cuda, print_freq):

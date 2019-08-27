@@ -1,1 +1,2 @@
-from .common import load_checkpoint, accuracy, AverageMeter, GradientMeter, MovingAverageMeter
+from .common import load_checkpoint, accuracy
+from .meters import AverageMeter, GradientMeter, MovingAverageMeter

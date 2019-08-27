@@ -1,136 +1,187 @@
 import argparse
-
-def str2bool(value):
-    return value.strip().lower() == 'true'
-
-def add_system_args(parser):
-    parser.add_argument('--train',
-                        default=False,
-                        type=str2bool,
-                        help='Train the model')
-    parser.add_argument('--test',
-                        default=False,
-                        type=str2bool,
-                        help='Test the model')
-    parser.add_argument('--infer',
-                        default=False,
-                        type=str2bool,
-                        help='Perform inference with the model')
-    parser.add_argument('--output_file',
-                        default=None,
-                        type=str,
-                        help='If specified, redirects output to file')
-    return parser
+import configparser
 
 
-def clean_system_args(args):
+def collect_args():
+    # Parse cli args
+    cli_parser = argparse.ArgumentParser()
+    _, cli_args = cli_parser.parse_known_args()
+
+    # Parse config file args
+    file_parser = configparser.ConfigParser()
+    # First cli arg is config file path
+    file_parser.read(cli_args[0])
+    file_args = file_parser.items('CONFIG ARGS')
+
+    # Merge cli args and file args with default args
+    args = merge_args(cli_args, file_args)
+
     return args
 
 
-def add_model_args(parser):
+def merge_args(cli_args, file_args):
+
+    parser = argparse.ArgumentParser()
+
+    #########
+    # Steps #
+    #########
+
+    parser.add_argument('--train_cam',
+                        default=False,
+                        type=str2bool,
+                        help='Train the backbone model on classification task')
+
+    parser.add_argument('--make_cam',
+                        default=False,
+                        type=str2bool,
+                        help='Create cams for images in irn_dataset')
+
+    parser.add_argument('--make_ir_label',
+                        default=False,
+                        type=str2bool,
+                        help='Create ir labels for images in irn_dataset')
+
+    parser.add_argument('--train_irn',
+                        default=False,
+                        type=str2bool,
+                        help='Train the irn model on pixel wise affinity task')
+
+    parser.add_argument('--make_ins_seg_labels',
+                        default=False,
+                        type=str2bool,
+                        help='Create instance segmentation labels with irn')
+
+    parser.add_argument('--make_sem_seg_labels',
+                        default=False,
+                        type=str2bool,
+                        help='Create semantic segmentation labes with irn')
+                        
+
+    ###############
+    # System args #
+    ###############
+
+    parser.add_argument('--num_threads',
+                        default=4,
+                        type=int,
+                        help='Number of data preprocessing threads.')
+
+    parser.add_argument('--num_gpus',
+                        default=1,
+                        type=int,
+                        help='Number of GPUs.')
+
+    ##############
+    # Model args #
+    ##############
+
     parser.add_argument('--architecture',
                         default='',
                         type=str,
-                        help='Name of model architecture')
+                        help='Name of model architecture. See ./models')
+
     parser.add_argument('--pretrained',
                         default=False,
                         type=str2bool,
                         help='Use pre-trained model.')
+
     parser.add_argument('--checkpoint',
                         default=None,
                         type=str,
-                        help='Path to latest checkpoint.')
+                        help='Path to checkpoint aka state dictionary.')
+
     parser.add_argument('--num_classes',
                         default=None,
                         type=int,
                         help='Number of classes')
-    return parser
 
+    ################
+    # Dataset args #
+    ################
 
-def clean_model_args(args):
-    return args
-
-
-def add_dataset_args(parser):
     parser.add_argument('--dataset',
                         default='dataset_folder',
                         type=str,
-                        help='Name of pytorch dataset to use')
+                        help='Name of pytorch dataset to use.'
+                             'See dataset_factory.py')
+
     parser.add_argument('--dataset_dir',
                         default=None,
                         help='Directory containing dataset')
-    parser.add_argument('--backgnd_samp_prob',
-                        default=0.2,
-                        type=float,
-                        help='Sampling rate of background class.')
+
     parser.add_argument('--image_size',
                         default='',
-                        type=str,
+                        type=str2list,
                         help='Size of transformed image ie height,width')
-    parser.add_argument('--num_threads',
-                        default=4,
-                        type=int,
-                        help='Number of data loading threads.')
+
     parser.add_argument('--batch_size',
                         default=None,
                         type=int,
                         help='Mini batch size.')
-    return parser
 
+    ##############
+    # Train args #
+    ##############
 
-def clean_dataset_args(args):
-    args.image_size = [int(s) for s in args.image_size.split(',')]
-    return args
-
-
-def add_train_args(parser):
     parser.add_argument('--epochs',
                         default=None,
                         type=int,
                         help='Number of epochs to run.')
+
     parser.add_argument('--start_epoch',
                         default=-1,
                         type=int,
-                        help='Epoch to start training at (effects learning rate)')
+                        help='Epoch to start training at (affects learning rate)')
+
     parser.add_argument('--print_freq',
                         default=10,
                         type=int,
                         help='Print every n iterations.')
+
     parser.add_argument('--mixed_prec_level',
                         default='O0',
                         type=str,
                         help='Level of mixed precision to use.'
                         'O0 = FP32, O1 = Conservative, O2 = Fast, O3 = FP16'
                         'O1 or O2 recommended. See Nvidia/Apex for details.')
+
     parser.add_argument('--criterion',
                         default='CrossEntropyLoss',
                         type=str,
                         help='Loss function.')
+
     parser.add_argument('--optimizer',
                         default='SGD',
                         type=str,
                         help='Network optimizer.')
+
     parser.add_argument('--lr',
                         default=0.001,
                         type=float,
                         help='Initial learning rate.')
+
     parser.add_argument('--lr_decay',
                         default=0.1,
                         type=float,
                         help='Amount to multiply lr every lr_decay_iters.')
+
     parser.add_argument('--lr_decay_iters',
                         default='',
-                        type=str,
+                        type=str2list,
                         help='Learning rate is decayed by lr_decay for each '
                         'iteration in lr_decay_iters.')
+
     parser.add_argument('--momentum',
                         default=0.9,
                         type=float,
                         help='Momentum.')
+
     parser.add_argument('--weight_decay',
                         default=1e-4,
                         type=float,
                         help='Weight decay.')
+
     parser.add_argument('--params_to_train',
                         default=None,
                         help='Regex expression to select trainable params '
@@ -140,111 +191,88 @@ def add_train_args(parser):
                         'params_to_train = ^.*(layer4|fc).*$ '
                         'Excluding params: '
                         'params_to_train = ^((?!ResNet\/(conv1|bn1)).)*$ ')
+
     parser.add_argument('--params_to_randomize',
                         default=None,
                         help='Regex expression to select params to randomize'
                         'based on their name. See examples in params_to_train.')
-    parser.add_argument('--models_dir',
+
+    parser.add_argument('--model_save_dir',
                         default=None,
                         help='Directory to output model checkpoints')
-    return parser
 
 
-def clean_train_args(args):
-    args.lr_decay_iters = [int(s) for s in args.lr_decay_iters.split(',')]
-    return args
+    #############
+    # Test args #
+    #############
 
-
-def add_test_args(parser):
-    parser.add_argument('--criterion',
-                        default='CrossEntropyLoss',
-                        type=str,
-                        help='Loss function.')
-    parser.add_argument('--print_freq',
+    parser.add_argument('--test_print_freq',
                         default=10,
                         type=int,
                         help='Print every n iterations.')
-    return parser
 
+    ##############
+    # Infer args #
+    ##############
 
-def clean_test_args(args):
-    return args
-
-
-def add_infer_args(parser):
     parser.add_argument('--inference_dir',
                         default='/data',
                         help='Directory containing images/videos to be inferenced.')
+
     parser.add_argument('--results_dir',
                         default='/data',
                         help='Directory where results will be saved.')
+
     parser.add_argument('--class_list',
                         default='',
                         type=str,
                         help='Path to list of classes.')
+
     parser.add_argument('--every_nth_frame',
                         default=30,
                         type=int,
                         help='Process every nth frame in a video.')
-    parser.add_argument('--num_threads',
-                        default=4,
-                        type=int,
-                        help='Number of data preprocessing threads.')
-    parser.add_argument('--crop',
+
+    parser.add_argument('--infer_crop',
                         default='',
-                        type=str,
+                        type=str2list,
                         help='Crops rectangular region from input image. The '
                         'box is a 4-tuple defining the left, upper, right, and '
                         'lower pixel coordinate.')
+
     parser.add_argument('--six_crop',
                         default=False,
                         type=str2bool,
                         help='Crop input image/video six ways - the four '
                         'corners, center and full image')
-    parser.add_argument('--image_size',
+
+    parser.add_argument('--infer_image_size',
                         default=None,
-                        type=str,
+                        type=str2list,
                         help='Size of transformed image ie width,heights')
-    parser.add_argument('--batch_size',
+
+    parser.add_argument('--infer_batch_size',
                         default=None,
                         type=int,
                         help='Mini batch size.')
+
     parser.add_argument('--visualize_results',
                         default=False,
                         type=str2bool,
                         help='Create a visual representation of processed '
                         'video/image results')
-    return parser
 
+    # File args override default args
+    parser.set_defaults(**dict(file_args))
 
-def clean_infer_args(args):
-    args.image_size = [int(s) for s in args.image_size.split(',')]
-    if args.crop:
-        args.crop = [int(s) for s in args.crop.split(',')]
+    # cli args override all args
+    args, _ = parser.parse_known_args(cli_args)
+
     return args
 
 
-section_parser_map = {
-    'SYSTEM': add_system_args,
-    'DATASET': add_dataset_args,
-    'TRAIN': add_train_args,
-    'TEST': add_test_args,
-    'INFER': add_infer_args,
-    'MODEL': add_model_args
-}
+def str2list(value):
+    return [int(s) for s in value.split(',')]
 
-def get_section_parser(section):
-    parser = argparse.ArgumentParser()
-    return section_parser_map[section](parser)
-
-section_cleaner_map = {
-    'SYSTEM': clean_system_args,
-    'DATASET': clean_dataset_args,
-    'TRAIN': clean_train_args,
-    'TEST': clean_test_args,
-    'INFER': clean_infer_args,
-    'MODEL': clean_model_args
-}
-
-def clean_section_args(args, section):
-    return section_cleaner_map[section](args)
+def str2bool(value):
+    return value.strip().lower() == 'true'
