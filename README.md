@@ -13,6 +13,10 @@ In order to automatically measure the animals' response, ABANet aims to find, tr
 
 ## Current Results
 
-Currently, ABANet is capable of performing classification and weak localization of animals within video frames. 
+Currently, ABANet is capable of performing classification and weak localization of animals within video frames. Our dataset consists only of image level labels, hence our models are trained exclusively through weak supervision.
 
-![](resources/hyena.gif)
+![](/assets/hyena.gif)
+
+## Future Work
+
+In order to perform weakly-supervised instance segmentation and classification, we are currently implementing the [Inter-Pixel Relation Network](https://arxiv.org/abs/1904.05044).
